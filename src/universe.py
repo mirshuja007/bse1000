@@ -36,7 +36,14 @@ _SUFFIX_WORDS = {
 
 def normalize_name(name: str) -> str:
     """Uppercase, strip punctuation and common corporate suffixes, so
-    truncated / differently-formatted company names can still be compared."""
+    truncated / differently-formatted company names can still be compared.
+
+    Some rows in Kite's live instrument dump (e.g. certain delisted/odd-lot
+    entries) have a missing `name`, which pandas reads back as NaN (a
+    float) rather than an empty string - guard against that here instead of
+    crashing re.sub."""
+    if not isinstance(name, str):
+        return ""
     cleaned = re.sub(r"[^A-Za-z0-9& ]", " ", name).upper()
     tokens = [t for t in cleaned.split() if t and t not in _SUFFIX_WORDS]
     return " ".join(tokens)

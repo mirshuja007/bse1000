@@ -1,4 +1,13 @@
+import math
+
 from src.universe import normalize_name
+
+
+def test_normalize_name_handles_non_string_input():
+    # Kite's live instrument dump has some rows with a missing `name`,
+    # which pandas reads back as NaN (a float) rather than "".
+    assert normalize_name(math.nan) == ""
+    assert normalize_name(None) == ""
 
 
 def test_normalize_name_strips_suffixes_and_punctuation():
