@@ -36,9 +36,20 @@ SESSION_CACHE = REPO_ROOT / ".cache" / "session.json"
 LOGIN_URL = "https://kite.zerodha.com/api/login"
 TWOFA_URL = "https://kite.zerodha.com/api/twofa"
 
+# kiteconnect defaults to a 7-second HTTP timeout, which is too short for
+# kite.instruments() - it downloads the full BSE/NSE instrument dump
+# (tens of thousands of rows) and can legitimately take longer, especially
+# on a slower connection. Every KiteConnect client in this app is built
+# with this timeout instead.
+KITE_HTTP_TIMEOUT = 60
+
 
 class AuthError(RuntimeError):
     pass
+
+
+def new_kite_client(api_key: str) -> KiteConnect:
+    return KiteConnect(api_key=api_key, timeout=KITE_HTTP_TIMEOUT)
 
 
 def _cache_is_fresh(cache: dict) -> bool:
@@ -87,7 +98,7 @@ def login_automated(creds: KiteCredentials | None = None, timeout: int = 15) -> 
 
     cached_token = load_cached_access_token()
     if cached_token:
-        kite = KiteConnect(api_key=creds.api_key)
+        kite = new_kite_client(creds.api_key)
         kite.set_access_token(cached_token)
         return kite
 
@@ -149,36 +160,75 @@ def login_automated(creds: KiteCredentials | None = None, timeout: int = 15) -> 
             "login_manual() instead."
         )
 
-    kite = KiteConnect(api_key=creds.api_key)
+    kite = new_kite_client(creds.api_key)
     session_data = kite.generate_session(request_token, api_secret=creds.api_secret)
+    kite.set_access_token(session_data["access_token"])
+    _save_access_token(session_data["access_token"])
+    return kite
+
+
+def get_login_url(creds: KiteCredentials | None = None) -> str:
+    """Return the standard Kite Connect login URL to open in a browser -
+    the first half of the manual login flow. Used by both the CLI prompt
+    and the Streamlit "manual login" panel."""
+    creds = creds or KiteCredentials()
+    if not creds.api_key:
+        raise AuthError("KITE_API_KEY missing from environment")
+    return new_kite_client(creds.api_key).login_url()
+
+
+def extract_request_token(raw: str) -> str:
+    """Accept either a bare request_token or the full redirect URL Kite
+    sends you to after login, and return just the token value."""
+    raw = raw.strip()
+    if "request_token" in raw:
+        qs = parse_qs(urlparse(raw).query)
+        if "request_token" in qs:
+            return qs["request_token"][0]
+    return raw
+
+
+def exchange_request_token(request_token: str, creds: KiteCredentials | None = None) -> KiteConnect:
+    """Second half of the manual login flow: trade a request_token (pasted
+    from the browser redirect) for an authenticated KiteConnect client.
+    This is the piece the Streamlit UI calls directly, since it can't use
+    a blocking `input()` prompt like the CLI flow does."""
+    creds = creds or KiteCredentials()
+    if not creds.api_key or not creds.api_secret:
+        raise AuthError("KITE_API_KEY / KITE_API_SECRET missing from environment")
+
+    token = extract_request_token(request_token)
+    if not token:
+        raise AuthError("Empty request_token")
+
+    kite = new_kite_client(creds.api_key)
+    session_data = kite.generate_session(token, api_secret=creds.api_secret)
     kite.set_access_token(session_data["access_token"])
     _save_access_token(session_data["access_token"])
     return kite
 
 
 def login_manual(creds: KiteCredentials | None = None) -> KiteConnect:
-    """Interactive fallback: prints a login URL, waits for you to paste the
-    resulting request_token."""
+    """Interactive CLI fallback: prints a login URL, waits for you to paste
+    the resulting request_token via a blocking `input()` prompt. Not usable
+    from Streamlit - see `get_login_url` / `exchange_request_token` for the
+    non-blocking building blocks the GUI uses instead."""
     creds = creds or KiteCredentials()
     if not creds.api_key or not creds.api_secret:
         raise AuthError("KITE_API_KEY / KITE_API_SECRET missing from environment")
 
     cached_token = load_cached_access_token()
     if cached_token:
-        kite = KiteConnect(api_key=creds.api_key)
+        kite = new_kite_client(creds.api_key)
         kite.set_access_token(cached_token)
         return kite
 
-    kite = KiteConnect(api_key=creds.api_key)
     print("1. Open this URL in a browser and log in:")
-    print(f"   {kite.login_url()}")
+    print(f"   {get_login_url(creds)}")
     print("2. After login you'll be redirected to a URL containing request_token=...")
-    request_token = input("Paste the request_token here: ").strip()
+    request_token = input("Paste the request_token (or the full redirect URL) here: ").strip()
 
-    session_data = kite.generate_session(request_token, api_secret=creds.api_secret)
-    kite.set_access_token(session_data["access_token"])
-    _save_access_token(session_data["access_token"])
-    return kite
+    return exchange_request_token(request_token, creds)
 
 
 def get_authenticated_kite(prefer_automated: bool = True) -> KiteConnect:

@@ -6,12 +6,19 @@ Strategy
    (`kite.instruments("BSE")` / `("NSE")`), equity only. These are cached
    locally for `data.cache_dir`-independent reuse (they change rarely).
 2. Match each constituent's BSE scrip code (`Symbol` in the source CSV)
-   *exactly* against the BSE dump's `tradingsymbol` - for BSE equities that
-   field literally is the scrip code, so this match is exact, not fuzzy.
+   *exactly* against the BSE dump's `exchange_token` - for BSE equities that
+   field is the scrip code (confirmed against a live instrument dump: e.g.
+   RELIANCE has exchange_token "500325", HDFCBANK "500180"). Note this is
+   NOT `tradingsymbol`, which on BSE is a separate mnemonic (e.g.
+   "RELIANCE", "ARE&M") unrelated to the scrip code.
 3. Because NSE is usually far more liquid for dual-listed names, look up the
-   equivalent NSE instrument by comparing Kite's own (untruncated) `name`
-   field between the two dumps, using normalized-string equality first and
-   a fuzzy ratio as a fallback/confidence score.
+   equivalent NSE instrument by comparing Kite's own `name` field between
+   the two dumps, using normalized-string equality first and a fuzzy ratio
+   as a fallback/confidence score. Kite's BSE `name` field is itself
+   truncated around 30 characters for longer company names (the same BSE
+   export limitation as the source CSV), so the fuzzy fallback matters even
+   here - suffix stripping in `normalize_name` closes most of the gap, but
+   not all of it, which is exactly why match_confidence is reported per row.
 4. Emit `data/universe_mapping.csv` (git-ignored) with both tokens, the
    chosen exchange, and a match_confidence column so you can eyeball and
    correct any low-confidence rows before the scanner trusts them.
@@ -40,7 +47,7 @@ def _cached_instruments(kite, exchange: str, force_refresh: bool = False) -> pd.
         and cache_path.exists()
         and (time.time() - cache_path.stat().st_mtime) < INSTRUMENT_DUMP_TTL_SECONDS
     ):
-        return pd.read_csv(cache_path, dtype={"tradingsymbol": str})
+        return pd.read_csv(cache_path, dtype={"tradingsymbol": str, "exchange_token": str})
 
     records = kite.instruments(exchange)
     df = pd.DataFrame.from_records(records)
@@ -58,6 +65,17 @@ def _build_nse_name_index(nse_df: pd.DataFrame) -> dict[str, list[int]]:
     return index
 
 
+def _is_token_prefix(tokens_a: list[str], tokens_b: list[str]) -> bool:
+    """True if one token list is a non-empty prefix of the other (at least
+    2 tokens of overlap, so a single common word like "TATA" alone doesn't
+    count). This is exactly the pattern BSE's ~30-character name truncation
+    produces against an NSE dump's full, untruncated name."""
+    shorter, longer = (tokens_a, tokens_b) if len(tokens_a) <= len(tokens_b) else (tokens_b, tokens_a)
+    if len(shorter) < 2:
+        return False
+    return longer[: len(shorter)] == shorter
+
+
 def _best_nse_match(name_key: str, nse_df: pd.DataFrame, name_index: dict[str, list[int]]):
     if not name_key:
         return None, 0.0
@@ -71,9 +89,16 @@ def _best_nse_match(name_key: str, nse_df: pd.DataFrame, name_index: dict[str, l
     if not candidates:
         return None, 0.0
 
+    tokens = name_key.split(" ")
     best_idx, best_score = None, 0.0
     for idx in candidates:
-        score = difflib.SequenceMatcher(None, name_key, nse_df["name_key"].iloc[idx]).ratio()
+        candidate_key = nse_df["name_key"].iloc[idx]
+        score = difflib.SequenceMatcher(None, name_key, candidate_key).ratio()
+        if _is_token_prefix(tokens, candidate_key.split(" ")):
+            # Truncation match: one name is a clean prefix of the other.
+            # Treat as high-confidence regardless of the length-penalized
+            # fuzzy ratio, but keep it a hair below a true exact match.
+            score = max(score, 0.95)
         if score > best_score:
             best_idx, best_score = idx, score
     return best_idx, best_score
@@ -89,11 +114,12 @@ def build_universe_mapping(
 
     bse_df = _cached_instruments(kite, "BSE", force_refresh_instruments)
     nse_df = _cached_instruments(kite, "NSE", force_refresh_instruments)
+    bse_df["exchange_token"] = bse_df["exchange_token"].astype(str)
     bse_df["name_key"] = bse_df["name"].apply(normalize_name)
     nse_df["name_key"] = nse_df["name"].apply(normalize_name)
     nse_name_index = _build_nse_name_index(nse_df)
 
-    bse_by_symbol = bse_df.set_index("tradingsymbol", drop=False)
+    bse_by_symbol = bse_df.set_index("exchange_token", drop=False)
 
     rows = []
     for _, u in universe.iterrows():

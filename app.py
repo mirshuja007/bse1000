@@ -16,8 +16,15 @@ import plotly.graph_objects as go
 import streamlit as st
 from plotly.subplots import make_subplots
 
-from src.auth import get_authenticated_kite
-from src.config import app_password, load_config
+from src.auth import (
+    AuthError,
+    exchange_request_token,
+    get_login_url,
+    load_cached_access_token,
+    login_automated,
+    new_kite_client,
+)
+from src.config import KiteCredentials, app_password, load_config
 from src.data_fetcher import fetch_benchmark_history, fetch_universe_history, resolve_benchmark_token
 from src.instruments import build_universe_mapping, load_mapping
 from src.scanner import run_scan
@@ -46,6 +53,87 @@ def check_password() -> bool:
 
 if not check_password():
     st.stop()
+
+
+# ---------------------------------------------------------------------------
+# Kite login panel - two explicit methods, since the automated TOTP flow can
+# break if Zerodha tweaks their login pages, and the manual flow can't use a
+# blocking input() prompt inside Streamlit like the CLI does.
+# ---------------------------------------------------------------------------
+def render_login_panel() -> None:
+    st.sidebar.header("Kite Connect Login")
+    creds = KiteCredentials()
+
+    if "kite" in st.session_state:
+        st.sidebar.success(f"Logged in ({st.session_state.get('login_method', 'unknown')})")
+        if st.sidebar.button("Log out"):
+            for key in ("kite", "login_method"):
+                st.session_state.pop(key, None)
+            st.rerun()
+        return
+
+    cached_token = load_cached_access_token()
+    if cached_token and creds.api_key:
+        st.sidebar.info("A cached session token from earlier today was found.")
+        if st.sidebar.button("Use cached session"):
+            kite = login_automated(creds) if creds.is_complete() else None
+            if kite is None:
+                kite = new_kite_client(creds.api_key)
+                kite.set_access_token(cached_token)
+            st.session_state.kite = kite
+            st.session_state.login_method = "cached"
+            st.rerun()
+
+    method = st.sidebar.radio(
+        "Login method", ["Automated (TOTP)", "Manual (paste token)"], key="login_method_choice"
+    )
+
+    if method == "Automated (TOTP)":
+        st.sidebar.caption("Uses KITE_USER_ID / KITE_PASSWORD / KITE_TOTP_SECRET from your .env")
+        if st.sidebar.button("Login with TOTP", type="primary"):
+            if not creds.is_complete():
+                st.sidebar.error("Missing in .env: " + ", ".join(creds.missing_fields()))
+            else:
+                try:
+                    with st.spinner("Logging in via automated TOTP flow..."):
+                        kite = login_automated(creds)
+                    st.session_state.kite = kite
+                    st.session_state.login_method = "TOTP"
+                    st.rerun()
+                except AuthError as exc:
+                    st.sidebar.error(f"Automated login failed: {exc}")
+
+    else:
+        if not creds.api_key or not creds.api_secret:
+            st.sidebar.error("KITE_API_KEY / KITE_API_SECRET missing from .env")
+        else:
+            try:
+                login_url = get_login_url(creds)
+                st.sidebar.markdown(f"**1.** [Log in on Kite]({login_url})")
+            except AuthError as exc:
+                st.sidebar.error(str(exc))
+                login_url = None
+
+            st.sidebar.caption(
+                "2. After logging in you'll land on a URL containing `request_token=...` "
+                "- paste that token, or the whole URL, below."
+            )
+            token_input = st.sidebar.text_input("request_token", key="manual_request_token")
+            if st.sidebar.button("Submit token", type="primary"):
+                if not token_input.strip():
+                    st.sidebar.error("Paste the request_token (or redirect URL) first.")
+                else:
+                    try:
+                        with st.spinner("Exchanging request token..."):
+                            kite = exchange_request_token(token_input, creds)
+                        st.session_state.kite = kite
+                        st.session_state.login_method = "manual token"
+                        st.rerun()
+                    except Exception as exc:  # kiteconnect raises assorted exception types
+                        st.sidebar.error(f"Login failed: {exc}")
+
+
+render_login_panel()
 
 
 # ---------------------------------------------------------------------------
@@ -158,18 +246,19 @@ col1, col2, col3 = st.columns([1, 1, 2])
 run_clicked = col1.button("Run scan", type="primary")
 refresh_mapping_clicked = col2.button("Refresh instrument mapping")
 
+if (run_clicked or refresh_mapping_clicked) and "kite" not in st.session_state:
+    st.warning("Log in to Kite first using the panel in the sidebar.")
+    run_clicked = refresh_mapping_clicked = False
+
 if refresh_mapping_clicked:
-    with st.spinner("Logging in and rebuilding BSE->Kite instrument mapping..."):
-        kite = get_authenticated_kite()
-        st.session_state.kite = kite
+    kite = st.session_state.kite
+    with st.spinner("Rebuilding BSE->Kite instrument mapping..."):
         mapping = build_universe_mapping(kite, force_refresh_instruments=True)
         st.session_state.mapping = mapping
     st.success(f"Mapping rebuilt: {mapping['resolved'].sum()}/{len(mapping)} constituents resolved.")
 
 if run_clicked:
-    with st.spinner("Logging in to Kite..."):
-        kite = get_authenticated_kite()
-        st.session_state.kite = kite
+    kite = st.session_state.kite
 
     with st.spinner("Loading universe mapping..."):
         mapping = load_mapping(refresh_with_kite=kite)
@@ -198,8 +287,6 @@ if run_clicked:
 
     history = {r.bse_code: r.bars for r in results if r.ok}
     n_failed = sum(1 for r in results if not r.ok)
-    if n_failed:
-        st.warning(f"{n_failed} stocks failed to fetch and were skipped.")
 
     with st.spinner("Scoring conviction..."):
         result_df, enriched_cache, skipped = run_scan(history, resolved, cfg, benchmark)
@@ -207,107 +294,138 @@ if run_clicked:
     st.session_state.result_df = result_df
     st.session_state.enriched_cache = enriched_cache
     st.session_state.scan_time = datetime.now()
+    st.session_state.scan_diagnostics = {
+        "universe_total": len(mapping),
+        "resolved": len(resolved),
+        "fetch_ok": len(history),
+        "fetch_failed": n_failed,
+        "skipped_insufficient_history": len(skipped),
+        "sample_fetch_errors": [r.error for r in results if not r.ok][:5],
+    }
 
 if "result_df" in st.session_state:
     result_df = st.session_state.result_df
     scan_time = st.session_state.scan_time
+    diag = st.session_state.get("scan_diagnostics", {})
     st.caption(f"Last scan: {scan_time.strftime('%Y-%m-%d %H:%M:%S')} - {len(result_df)} stocks scored")
 
-    tier_counts = result_df["conviction_tier"].value_counts()
-    tiers_order = ["Very High Conviction", "High Conviction", "Moderate Conviction", "Watchlist"]
-    cols = st.columns(len(tiers_order))
-    for c, tier in zip(cols, tiers_order):
-        c.metric(tier, int(tier_counts.get(tier, 0)))
+    if diag:
+        with st.expander("Scan diagnostics", expanded=result_df.empty):
+            st.write(
+                f"Universe: {diag.get('universe_total', '?')} constituents · "
+                f"Resolved to a Kite instrument: {diag.get('resolved', '?')} · "
+                f"History fetched OK: {diag.get('fetch_ok', '?')} · "
+                f"Fetch failures: {diag.get('fetch_failed', '?')} · "
+                f"Skipped (insufficient history): {diag.get('skipped_insufficient_history', '?')}"
+            )
+            if diag.get("sample_fetch_errors"):
+                st.write("Sample fetch errors:")
+                for err in diag["sample_fetch_errors"]:
+                    st.code(err)
 
-    show_candidates_only = st.checkbox("Show only stocks passing all filters", value=True)
-    min_score = st.slider("Minimum conviction score", 0, 100, 0)
-
-    view = result_df.copy()
-    if show_candidates_only:
-        view = view[view["passes_all_filters"]]
-    view = view[view["conviction_score"] >= min_score]
-
-    display_cols = [
-        "company_name",
-        "tradingsymbol",
-        "exchange",
-        "sector",
-        "conviction_score",
-        "conviction_tier",
-        "close",
-        "rsi",
-        "adx",
-        "volume_surge",
-        "pct_above_sma50",
-        "roc5",
-        "roc10",
-        "relative_return_20d",
-        "donchian_breakout",
-        "notes",
-    ]
-    st.dataframe(view[display_cols], use_container_width=True, height=450)
-
-    st.download_button(
-        "Download this view as CSV",
-        view.to_csv(index=False).encode("utf-8"),
-        file_name=f"bse1000_scan_{scan_time.strftime('%Y%m%d_%H%M%S')}.csv",
-        mime="text/csv",
-    )
-
-    st.subheader("Stock detail")
-    if len(view):
-        selected = st.selectbox(
-            "Pick a stock",
-            options=view["bse_code"].tolist(),
-            format_func=lambda code: f"{view.set_index('bse_code').loc[code, 'company_name']} ({view.set_index('bse_code').loc[code, 'tradingsymbol']})",
+    if result_df.empty:
+        st.error(
+            "The scan returned zero stocks. Check the diagnostics above - the most common causes are "
+            "instrument mapping resolving 0 stocks (try 'Refresh instrument mapping'), every history "
+            "fetch failing (often an expired/invalid Kite session - log out and back in), or "
+            "`data.history_days` in the config being too short for the 200DMA to compute."
         )
-        row = result_df.set_index("bse_code").loc[selected]
-        enriched = st.session_state.enriched_cache.get(selected)
-
-        score_col, chart_col = st.columns([1, 3])
-        with score_col:
-            st.metric("Conviction score", f"{row['conviction_score']:.1f}", row["conviction_tier"])
-            for label, key in [
-                ("Trend", "score_trend"),
-                ("Momentum", "score_momentum"),
-                ("Volume", "score_volume"),
-                ("Breakout quality", "score_breakout_quality"),
-                ("Relative strength", "score_relative_strength"),
-                ("Sector strength", "score_sector_strength"),
-            ]:
-                st.progress(min(row[key] / 100, 1.0), text=f"{label}: {row[key]:.0f}")
-            if row["notes"]:
-                st.info(row["notes"])
-
-        with chart_col:
-            if enriched is not None and not enriched.empty:
-                tail = enriched.tail(150)
-                fig = make_subplots(
-                    rows=3,
-                    cols=1,
-                    shared_xaxes=True,
-                    row_heights=[0.55, 0.2, 0.25],
-                    vertical_spacing=0.03,
-                    subplot_titles=("Price / 50DMA / 200DMA", "Volume", "RSI"),
-                )
-                fig.add_trace(
-                    go.Candlestick(
-                        x=tail["date"], open=tail["open"], high=tail["high"], low=tail["low"], close=tail["close"],
-                        name="Price",
-                    ),
-                    row=1,
-                    col=1,
-                )
-                fig.add_trace(go.Scatter(x=tail["date"], y=tail["sma50"], name="50DMA", line=dict(width=1.5)), row=1, col=1)
-                fig.add_trace(go.Scatter(x=tail["date"], y=tail["sma200"], name="200DMA", line=dict(width=1.5)), row=1, col=1)
-                fig.add_trace(go.Bar(x=tail["date"], y=tail["volume"], name="Volume"), row=2, col=1)
-                fig.add_trace(go.Scatter(x=tail["date"], y=tail["rsi"], name="RSI"), row=3, col=1)
-                fig.add_hline(y=70, line_dash="dot", row=3, col=1)
-                fig.add_hline(y=30, line_dash="dot", row=3, col=1)
-                fig.update_layout(height=650, showlegend=False, xaxis_rangeslider_visible=False)
-                st.plotly_chart(fig, use_container_width=True)
     else:
-        st.info("No stocks match the current filters/score threshold.")
+        tier_counts = result_df["conviction_tier"].value_counts()
+        tiers_order = ["Very High Conviction", "High Conviction", "Moderate Conviction", "Watchlist"]
+        cols = st.columns(len(tiers_order))
+        for c, tier in zip(cols, tiers_order):
+            c.metric(tier, int(tier_counts.get(tier, 0)))
+
+        show_candidates_only = st.checkbox("Show only stocks passing all filters", value=True)
+        min_score = st.slider("Minimum conviction score", 0, 100, 0)
+
+        view = result_df.copy()
+        if show_candidates_only:
+            view = view[view["passes_all_filters"]]
+        view = view[view["conviction_score"] >= min_score]
+
+        display_cols = [
+            "company_name",
+            "tradingsymbol",
+            "exchange",
+            "sector",
+            "conviction_score",
+            "conviction_tier",
+            "close",
+            "rsi",
+            "adx",
+            "volume_surge",
+            "pct_above_sma50",
+            "roc5",
+            "roc10",
+            "relative_return_20d",
+            "donchian_breakout",
+            "notes",
+        ]
+        st.dataframe(view[display_cols], use_container_width=True, height=450)
+
+        st.download_button(
+            "Download this view as CSV",
+            view.to_csv(index=False).encode("utf-8"),
+            file_name=f"bse1000_scan_{scan_time.strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv",
+        )
+
+        st.subheader("Stock detail")
+        if len(view):
+            selected = st.selectbox(
+                "Pick a stock",
+                options=view["bse_code"].tolist(),
+                format_func=lambda code: f"{view.set_index('bse_code').loc[code, 'company_name']} ({view.set_index('bse_code').loc[code, 'tradingsymbol']})",
+            )
+            row = result_df.set_index("bse_code").loc[selected]
+            enriched = st.session_state.enriched_cache.get(selected)
+
+            score_col, chart_col = st.columns([1, 3])
+            with score_col:
+                st.metric("Conviction score", f"{row['conviction_score']:.1f}", row["conviction_tier"])
+                for label, key in [
+                    ("Trend", "score_trend"),
+                    ("Momentum", "score_momentum"),
+                    ("Volume", "score_volume"),
+                    ("Breakout quality", "score_breakout_quality"),
+                    ("Relative strength", "score_relative_strength"),
+                    ("Sector strength", "score_sector_strength"),
+                ]:
+                    st.progress(min(row[key] / 100, 1.0), text=f"{label}: {row[key]:.0f}")
+                if row["notes"]:
+                    st.info(row["notes"])
+
+            with chart_col:
+                if enriched is not None and not enriched.empty:
+                    tail = enriched.tail(150)
+                    fig = make_subplots(
+                        rows=3,
+                        cols=1,
+                        shared_xaxes=True,
+                        row_heights=[0.55, 0.2, 0.25],
+                        vertical_spacing=0.03,
+                        subplot_titles=("Price / 50DMA / 200DMA", "Volume", "RSI"),
+                    )
+                    fig.add_trace(
+                        go.Candlestick(
+                            x=tail["date"], open=tail["open"], high=tail["high"], low=tail["low"], close=tail["close"],
+                            name="Price",
+                        ),
+                        row=1,
+                        col=1,
+                    )
+                    fig.add_trace(go.Scatter(x=tail["date"], y=tail["sma50"], name="50DMA", line=dict(width=1.5)), row=1, col=1)
+                    fig.add_trace(go.Scatter(x=tail["date"], y=tail["sma200"], name="200DMA", line=dict(width=1.5)), row=1, col=1)
+                    fig.add_trace(go.Bar(x=tail["date"], y=tail["volume"], name="Volume"), row=2, col=1)
+                    fig.add_trace(go.Scatter(x=tail["date"], y=tail["rsi"], name="RSI"), row=3, col=1)
+                    fig.add_hline(y=70, line_dash="dot", row=3, col=1)
+                    fig.add_hline(y=30, line_dash="dot", row=3, col=1)
+                    fig.update_layout(height=650, showlegend=False, xaxis_rangeslider_visible=False)
+                    st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No stocks match the current filters/score threshold.")
 else:
     st.info("Click **Run scan** to fetch live data from Kite and score the BSE 1000 universe.")
     st.caption(
