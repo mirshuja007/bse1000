@@ -36,9 +36,20 @@ SESSION_CACHE = REPO_ROOT / ".cache" / "session.json"
 LOGIN_URL = "https://kite.zerodha.com/api/login"
 TWOFA_URL = "https://kite.zerodha.com/api/twofa"
 
+# kiteconnect defaults to a 7-second HTTP timeout, which is too short for
+# kite.instruments() - it downloads the full BSE/NSE instrument dump
+# (tens of thousands of rows) and can legitimately take longer, especially
+# on a slower connection. Every KiteConnect client in this app is built
+# with this timeout instead.
+KITE_HTTP_TIMEOUT = 60
+
 
 class AuthError(RuntimeError):
     pass
+
+
+def new_kite_client(api_key: str) -> KiteConnect:
+    return KiteConnect(api_key=api_key, timeout=KITE_HTTP_TIMEOUT)
 
 
 def _cache_is_fresh(cache: dict) -> bool:
@@ -87,7 +98,7 @@ def login_automated(creds: KiteCredentials | None = None, timeout: int = 15) -> 
 
     cached_token = load_cached_access_token()
     if cached_token:
-        kite = KiteConnect(api_key=creds.api_key)
+        kite = new_kite_client(creds.api_key)
         kite.set_access_token(cached_token)
         return kite
 
@@ -149,7 +160,7 @@ def login_automated(creds: KiteCredentials | None = None, timeout: int = 15) -> 
             "login_manual() instead."
         )
 
-    kite = KiteConnect(api_key=creds.api_key)
+    kite = new_kite_client(creds.api_key)
     session_data = kite.generate_session(request_token, api_secret=creds.api_secret)
     kite.set_access_token(session_data["access_token"])
     _save_access_token(session_data["access_token"])
@@ -163,7 +174,7 @@ def get_login_url(creds: KiteCredentials | None = None) -> str:
     creds = creds or KiteCredentials()
     if not creds.api_key:
         raise AuthError("KITE_API_KEY missing from environment")
-    return KiteConnect(api_key=creds.api_key).login_url()
+    return new_kite_client(creds.api_key).login_url()
 
 
 def extract_request_token(raw: str) -> str:
@@ -190,7 +201,7 @@ def exchange_request_token(request_token: str, creds: KiteCredentials | None = N
     if not token:
         raise AuthError("Empty request_token")
 
-    kite = KiteConnect(api_key=creds.api_key)
+    kite = new_kite_client(creds.api_key)
     session_data = kite.generate_session(token, api_secret=creds.api_secret)
     kite.set_access_token(session_data["access_token"])
     _save_access_token(session_data["access_token"])
@@ -208,7 +219,7 @@ def login_manual(creds: KiteCredentials | None = None) -> KiteConnect:
 
     cached_token = load_cached_access_token()
     if cached_token:
-        kite = KiteConnect(api_key=creds.api_key)
+        kite = new_kite_client(creds.api_key)
         kite.set_access_token(cached_token)
         return kite
 

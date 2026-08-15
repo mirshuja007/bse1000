@@ -16,7 +16,14 @@ import plotly.graph_objects as go
 import streamlit as st
 from plotly.subplots import make_subplots
 
-from src.auth import AuthError, exchange_request_token, get_login_url, load_cached_access_token, login_automated
+from src.auth import (
+    AuthError,
+    exchange_request_token,
+    get_login_url,
+    load_cached_access_token,
+    login_automated,
+    new_kite_client,
+)
 from src.config import KiteCredentials, app_password, load_config
 from src.data_fetcher import fetch_benchmark_history, fetch_universe_history, resolve_benchmark_token
 from src.instruments import build_universe_mapping, load_mapping
@@ -71,9 +78,7 @@ def render_login_panel() -> None:
         if st.sidebar.button("Use cached session"):
             kite = login_automated(creds) if creds.is_complete() else None
             if kite is None:
-                from kiteconnect import KiteConnect
-
-                kite = KiteConnect(api_key=creds.api_key)
+                kite = new_kite_client(creds.api_key)
                 kite.set_access_token(cached_token)
             st.session_state.kite = kite
             st.session_state.login_method = "cached"

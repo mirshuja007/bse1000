@@ -6,15 +6,14 @@ one the Streamlit app already created) - no need to log in again.
 
 Run from the project root:  python debug_instruments.py
 """
-from src.auth import load_cached_access_token, AuthError, get_authenticated_kite
+from src.auth import load_cached_access_token, AuthError, get_authenticated_kite, new_kite_client
 from src.config import KiteCredentials
 from src.universe import load_universe
-from kiteconnect import KiteConnect
 
 creds = KiteCredentials()
 cached_token = load_cached_access_token()
 if cached_token and creds.api_key:
-    kite = KiteConnect(api_key=creds.api_key)
+    kite = new_kite_client(creds.api_key)
     kite.set_access_token(cached_token)
     print("Using cached session token from today's login.\n")
 else:
