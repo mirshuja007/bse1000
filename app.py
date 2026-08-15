@@ -16,8 +16,8 @@ import plotly.graph_objects as go
 import streamlit as st
 from plotly.subplots import make_subplots
 
-from src.auth import get_authenticated_kite
-from src.config import app_password, load_config
+from src.auth import AuthError, exchange_request_token, get_login_url, load_cached_access_token, login_automated
+from src.config import KiteCredentials, app_password, load_config
 from src.data_fetcher import fetch_benchmark_history, fetch_universe_history, resolve_benchmark_token
 from src.instruments import build_universe_mapping, load_mapping
 from src.scanner import run_scan
@@ -46,6 +46,89 @@ def check_password() -> bool:
 
 if not check_password():
     st.stop()
+
+
+# ---------------------------------------------------------------------------
+# Kite login panel - two explicit methods, since the automated TOTP flow can
+# break if Zerodha tweaks their login pages, and the manual flow can't use a
+# blocking input() prompt inside Streamlit like the CLI does.
+# ---------------------------------------------------------------------------
+def render_login_panel() -> None:
+    st.sidebar.header("Kite Connect Login")
+    creds = KiteCredentials()
+
+    if "kite" in st.session_state:
+        st.sidebar.success(f"Logged in ({st.session_state.get('login_method', 'unknown')})")
+        if st.sidebar.button("Log out"):
+            for key in ("kite", "login_method"):
+                st.session_state.pop(key, None)
+            st.rerun()
+        return
+
+    cached_token = load_cached_access_token()
+    if cached_token and creds.api_key:
+        st.sidebar.info("A cached session token from earlier today was found.")
+        if st.sidebar.button("Use cached session"):
+            kite = login_automated(creds) if creds.is_complete() else None
+            if kite is None:
+                from kiteconnect import KiteConnect
+
+                kite = KiteConnect(api_key=creds.api_key)
+                kite.set_access_token(cached_token)
+            st.session_state.kite = kite
+            st.session_state.login_method = "cached"
+            st.rerun()
+
+    method = st.sidebar.radio(
+        "Login method", ["Automated (TOTP)", "Manual (paste token)"], key="login_method_choice"
+    )
+
+    if method == "Automated (TOTP)":
+        st.sidebar.caption("Uses KITE_USER_ID / KITE_PASSWORD / KITE_TOTP_SECRET from your .env")
+        if st.sidebar.button("Login with TOTP", type="primary"):
+            if not creds.is_complete():
+                st.sidebar.error("Missing in .env: " + ", ".join(creds.missing_fields()))
+            else:
+                try:
+                    with st.spinner("Logging in via automated TOTP flow..."):
+                        kite = login_automated(creds)
+                    st.session_state.kite = kite
+                    st.session_state.login_method = "TOTP"
+                    st.rerun()
+                except AuthError as exc:
+                    st.sidebar.error(f"Automated login failed: {exc}")
+
+    else:
+        if not creds.api_key or not creds.api_secret:
+            st.sidebar.error("KITE_API_KEY / KITE_API_SECRET missing from .env")
+        else:
+            try:
+                login_url = get_login_url(creds)
+                st.sidebar.markdown(f"**1.** [Log in on Kite]({login_url})")
+            except AuthError as exc:
+                st.sidebar.error(str(exc))
+                login_url = None
+
+            st.sidebar.caption(
+                "2. After logging in you'll land on a URL containing `request_token=...` "
+                "- paste that token, or the whole URL, below."
+            )
+            token_input = st.sidebar.text_input("request_token", key="manual_request_token")
+            if st.sidebar.button("Submit token", type="primary"):
+                if not token_input.strip():
+                    st.sidebar.error("Paste the request_token (or redirect URL) first.")
+                else:
+                    try:
+                        with st.spinner("Exchanging request token..."):
+                            kite = exchange_request_token(token_input, creds)
+                        st.session_state.kite = kite
+                        st.session_state.login_method = "manual token"
+                        st.rerun()
+                    except Exception as exc:  # kiteconnect raises assorted exception types
+                        st.sidebar.error(f"Login failed: {exc}")
+
+
+render_login_panel()
 
 
 # ---------------------------------------------------------------------------
@@ -158,18 +241,19 @@ col1, col2, col3 = st.columns([1, 1, 2])
 run_clicked = col1.button("Run scan", type="primary")
 refresh_mapping_clicked = col2.button("Refresh instrument mapping")
 
+if (run_clicked or refresh_mapping_clicked) and "kite" not in st.session_state:
+    st.warning("Log in to Kite first using the panel in the sidebar.")
+    run_clicked = refresh_mapping_clicked = False
+
 if refresh_mapping_clicked:
-    with st.spinner("Logging in and rebuilding BSE->Kite instrument mapping..."):
-        kite = get_authenticated_kite()
-        st.session_state.kite = kite
+    kite = st.session_state.kite
+    with st.spinner("Rebuilding BSE->Kite instrument mapping..."):
         mapping = build_universe_mapping(kite, force_refresh_instruments=True)
         st.session_state.mapping = mapping
     st.success(f"Mapping rebuilt: {mapping['resolved'].sum()}/{len(mapping)} constituents resolved.")
 
 if run_clicked:
-    with st.spinner("Logging in to Kite..."):
-        kite = get_authenticated_kite()
-        st.session_state.kite = kite
+    kite = st.session_state.kite
 
     with st.spinner("Loading universe mapping..."):
         mapping = load_mapping(refresh_with_kite=kite)
