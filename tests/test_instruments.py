@@ -29,6 +29,19 @@ def test_normalize_name_is_order_preserving_and_uppercase():
     assert normalize_name("Aditya Birla Capital Ltd") == "ADITYA BIRLA CAPITAL"
 
 
+def test_normalize_name_collapses_dotted_initials_into_acronym():
+    # Real failure from a live scan: "E.I.D.-PARRY" split into three stray
+    # single-letter tokens ("E", "I", "D") that never matched anything,
+    # instead of the acronym "EID" a human reads it as.
+    assert normalize_name("E.I.D.-PARRY (INDIA) LTD.") == "EID PARRY"
+    assert normalize_name("T D POWER SYSTEMS LTD.") == "TD POWER SYSTEMS"
+    assert normalize_name("J.K.CEMENT LTD.") == "JK CEMENT"
+
+
+def test_normalize_name_does_not_merge_ampersand_as_an_initial():
+    assert normalize_name("L.G.BALAKRISHNAN & BROS.LTD.") == "LG BALAKRISHNAN BROS"
+
+
 def test_is_token_prefix_true_for_genuine_prefix():
     assert _is_token_prefix(["POWER", "GRID", "CORP"], ["POWER", "GRID", "CORP", "OF", "INDIA"])
     assert _is_token_prefix(["POWER", "GRID", "CORP", "OF", "INDIA"], ["POWER", "GRID", "CORP"])

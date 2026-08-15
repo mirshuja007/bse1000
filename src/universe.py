@@ -34,6 +34,29 @@ _SUFFIX_WORDS = {
 }
 
 
+def _merge_initials(tokens: list[str]) -> list[str]:
+    """Collapse runs of single-letter tokens into one acronym token, so
+    "E.I.D.-PARRY" (which punctuation-stripping splits into "E", "I", "D",
+    "PARRY") becomes ["EID", "PARRY"] instead of leaving three stray
+    single-letter tokens that never match anything. "&" is excluded since
+    it's punctuation, not an initial."""
+    merged = []
+    i = 0
+    while i < len(tokens):
+        if len(tokens[i]) == 1 and tokens[i] != "&":
+            j = i
+            acronym = ""
+            while j < len(tokens) and len(tokens[j]) == 1 and tokens[j] != "&":
+                acronym += tokens[j]
+                j += 1
+            merged.append(acronym)
+            i = j
+        else:
+            merged.append(tokens[i])
+            i += 1
+    return merged
+
+
 def normalize_name(name: str) -> str:
     """Uppercase, strip punctuation and common corporate suffixes, so
     truncated / differently-formatted company names can still be compared.
@@ -45,7 +68,8 @@ def normalize_name(name: str) -> str:
     if not isinstance(name, str):
         return ""
     cleaned = re.sub(r"[^A-Za-z0-9& ]", " ", name).upper()
-    tokens = [t for t in cleaned.split() if t and t not in _SUFFIX_WORDS]
+    tokens = _merge_initials(cleaned.split())
+    tokens = [t for t in tokens if t and t not in _SUFFIX_WORDS]
     return " ".join(tokens)
 
 
