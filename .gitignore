@@ -1,0 +1,29 @@
+# secrets & local env
+.env
+*.env
+!.env.example
+
+# kite session cache (access tokens, request tokens)
+.cache/
+*.session.json
+
+# scan outputs
+outputs/
+*.parquet
+data/universe_mapping.csv
+data/kite_instruments_*.csv
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# streamlit
+.streamlit/secrets.toml
+
+# os / editor
+.DS_Store
+.vscode/
