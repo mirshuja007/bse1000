@@ -1,5 +1,8 @@
 import math
 
+import pandas as pd
+
+from src.instruments import _best_nse_match, _build_nse_name_index, _is_token_prefix
 from src.universe import normalize_name
 
 
@@ -24,3 +27,33 @@ def test_normalize_name_handles_truncation_artifact():
 
 def test_normalize_name_is_order_preserving_and_uppercase():
     assert normalize_name("Aditya Birla Capital Ltd") == "ADITYA BIRLA CAPITAL"
+
+
+def test_is_token_prefix_true_for_genuine_prefix():
+    assert _is_token_prefix(["POWER", "GRID", "CORP"], ["POWER", "GRID", "CORP", "OF", "INDIA"])
+    assert _is_token_prefix(["POWER", "GRID", "CORP", "OF", "INDIA"], ["POWER", "GRID", "CORP"])
+
+
+def test_is_token_prefix_false_for_single_word_overlap():
+    # A single shared word (e.g. "TATA") must not count as a prefix match -
+    # that's how "TATA STEEL" would wrongly match "TATA MOTORS".
+    assert not _is_token_prefix(["TATA"], ["TATA", "MOTORS"])
+
+
+def test_is_token_prefix_false_for_divergent_names():
+    assert not _is_token_prefix(["TATA", "STEEL"], ["TATA", "MOTORS", "LIMITED"])
+
+
+def test_best_nse_match_boosts_truncated_bse_name_against_full_nse_name():
+    # This is the real-world case that was silently failing: Kite's BSE
+    # `name` field is truncated the same way the source CSV's is, so a
+    # naive length-sensitive fuzzy ratio scores it below the confidence
+    # threshold even though it's unambiguously the same company.
+    bse_key = normalize_name("POWER GRID CORPORATION OF INDI")  # truncated, as Kite really returns it
+    nse_df = pd.DataFrame(
+        {"name_key": [normalize_name("POWER GRID CORPORATION OF INDIA LIMITED"), "SOME UNRELATED CO"]}
+    )
+    name_index = _build_nse_name_index(nse_df)
+    idx, score = _best_nse_match(bse_key, nse_df, name_index)
+    assert idx == 0
+    assert score >= 0.9

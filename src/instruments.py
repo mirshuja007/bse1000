@@ -65,6 +65,17 @@ def _build_nse_name_index(nse_df: pd.DataFrame) -> dict[str, list[int]]:
     return index
 
 
+def _is_token_prefix(tokens_a: list[str], tokens_b: list[str]) -> bool:
+    """True if one token list is a non-empty prefix of the other (at least
+    2 tokens of overlap, so a single common word like "TATA" alone doesn't
+    count). This is exactly the pattern BSE's ~30-character name truncation
+    produces against an NSE dump's full, untruncated name."""
+    shorter, longer = (tokens_a, tokens_b) if len(tokens_a) <= len(tokens_b) else (tokens_b, tokens_a)
+    if len(shorter) < 2:
+        return False
+    return longer[: len(shorter)] == shorter
+
+
 def _best_nse_match(name_key: str, nse_df: pd.DataFrame, name_index: dict[str, list[int]]):
     if not name_key:
         return None, 0.0
@@ -78,9 +89,16 @@ def _best_nse_match(name_key: str, nse_df: pd.DataFrame, name_index: dict[str, l
     if not candidates:
         return None, 0.0
 
+    tokens = name_key.split(" ")
     best_idx, best_score = None, 0.0
     for idx in candidates:
-        score = difflib.SequenceMatcher(None, name_key, nse_df["name_key"].iloc[idx]).ratio()
+        candidate_key = nse_df["name_key"].iloc[idx]
+        score = difflib.SequenceMatcher(None, name_key, candidate_key).ratio()
+        if _is_token_prefix(tokens, candidate_key.split(" ")):
+            # Truncation match: one name is a clean prefix of the other.
+            # Treat as high-confidence regardless of the length-penalized
+            # fuzzy ratio, but keep it a hair below a true exact match.
+            score = max(score, 0.95)
         if score > best_score:
             best_idx, best_score = idx, score
     return best_idx, best_score
