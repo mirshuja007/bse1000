@@ -86,6 +86,34 @@ def test_rsi_overbought_penalty_applies():
     assert any("overbought" in note.lower() for note in result.notes)
 
 
+def test_explanation_mentions_breakout_and_volume():
+    config = load_config()
+    result = compute_conviction(base_snapshot(), sector_strength_score=80, config=config)
+    assert "fresh multi-week high" in result.explanation
+    assert "2.0x average volume" in result.explanation
+
+
+def test_explanation_flags_deep_overbought_rsi():
+    config = load_config()
+    result = compute_conviction(base_snapshot(rsi=95), sector_strength_score=80, config=config)
+    assert "overbought" in result.explanation.lower()
+
+
+def test_explanation_is_never_empty():
+    config = load_config()
+    neutral_snap = base_snapshot(
+        price_above_50=False,
+        golden_cross=False,
+        donchian_breakout=False,
+        dma50_breakout_recent=False,
+        volume_surge=1.0,
+        rsi=float("nan"),
+        relative_return_20d=0,
+    )
+    result = compute_conviction(neutral_snap, sector_strength_score=50, config=config)
+    assert result.explanation
+
+
 def test_weak_setup_lands_in_watchlist():
     config = load_config()
     weak_snap = base_snapshot(

@@ -98,3 +98,14 @@ conviction:
   # Horizon this whole model is tuned for. Not used in the math directly, but
   # documents the intent and drives default lookbacks above.
   target_horizon_days: [1, 15]
+
+# ---------------------------------------------------------------------------
+# Suggested risk levels, shown per stock alongside the conviction score.
+# ATR-based stop/target is a standard volatility-adjusted approach: the stop
+# sits stop_multiplier ATRs below the close, the target sits target_multiplier
+# ATRs above it. Default is a 2:1 reward:risk ratio. This is a suggestion,
+# not a recommendation to size or place any specific trade.
+# ---------------------------------------------------------------------------
+risk:
+  atr_stop_multiplier: 1.5
+  atr_target_multiplier: 3.0

@@ -24,7 +24,7 @@ from src.auth import (
     login_automated,
     new_kite_client,
 )
-from src.config import KiteCredentials, app_password, load_config
+from src.config import KiteCredentials, app_password, deep_merge, load_config
 from src.data_fetcher import fetch_benchmark_history, fetch_universe_history, resolve_benchmark_token
 from src.instruments import build_universe_mapping, load_mapping
 from src.scanner import run_scan
@@ -137,10 +137,91 @@ render_login_panel()
 
 
 # ---------------------------------------------------------------------------
+# Swing vs positional presets - a curated starting point for each trading
+# style, so someone doesn't have to understand and hand-tune 15+ sliders
+# before getting a sensible scan. Power users can still adjust anything
+# below after picking a preset; picking "Custom" just leaves whatever is
+# currently in the config alone.
+# ---------------------------------------------------------------------------
+SWING_PRESET = {
+    "filters": {
+        "liquidity": {"min_price": 30, "min_avg_turnover_cr": 5},
+        "volume": {"surge_multiplier": 1.8},
+        "dma50_breakout": {"lookback_days": 5},
+        "dma200_breakout": {"enabled": False},
+        "trend_filter": {"require_50_above_200": False},
+        "rsi": {"min_rsi": 55, "max_rsi": 85, "flag_above": 70},
+        "donchian_breakout": {"period": 15},
+        "adx": {"min_adx": 18},
+    },
+    "conviction": {
+        "weights": {
+            "trend": 15,
+            "momentum": 25,
+            "volume": 20,
+            "breakout_quality": 25,
+            "relative_strength": 10,
+            "sector_strength": 5,
+        },
+        "extended_penalty": {"pct_above_pivot_threshold": 8},
+        "rsi_overbought_penalty": {"threshold": 78},
+    },
+}
+
+POSITIONAL_PRESET = {
+    "filters": {
+        "liquidity": {"min_price": 30, "min_avg_turnover_cr": 5},
+        "volume": {"surge_multiplier": 1.5},
+        "dma50_breakout": {"lookback_days": 10},
+        "dma200_breakout": {"enabled": True},
+        "trend_filter": {"require_50_above_200": True},
+        "rsi": {"min_rsi": 60, "max_rsi": 80, "flag_above": 70},
+        "donchian_breakout": {"period": 50},
+        "adx": {"min_adx": 22},
+    },
+    "conviction": {
+        "weights": {
+            "trend": 15,
+            "momentum": 25,
+            "volume": 20,
+            "breakout_quality": 25,
+            "relative_strength": 10,
+            "sector_strength": 5,
+        },
+        "extended_penalty": {"pct_above_pivot_threshold": 15},
+        "rsi_overbought_penalty": {"threshold": 82},
+    },
+}
+
+PRESET_LABELS = {
+    "Custom (manual)": None,
+    "Swing (3-7 days)": SWING_PRESET,
+    "Positional (8-15 days)": POSITIONAL_PRESET,
+}
+
+
+def render_preset_selector() -> None:
+    st.sidebar.header("Trading style preset")
+    choice = st.sidebar.selectbox("Preset", list(PRESET_LABELS.keys()), key="preset_choice")
+    st.sidebar.caption(
+        "Applies a curated set of filter thresholds and conviction weights for the chosen "
+        "holding period. You can still fine-tune anything below afterward."
+    )
+    if choice != st.session_state.get("_applied_preset"):
+        preset = PRESET_LABELS[choice]
+        st.session_state.config = deep_merge(load_config(), preset) if preset else load_config()
+        st.session_state._applied_preset = choice
+        st.rerun()
+
+
+# ---------------------------------------------------------------------------
 # Config state
 # ---------------------------------------------------------------------------
 if "config" not in st.session_state:
     st.session_state.config = load_config()
+    st.session_state._applied_preset = "Custom (manual)"
+
+render_preset_selector()
 
 cfg = st.session_state.config
 
@@ -353,6 +434,8 @@ if "result_df" in st.session_state:
             "conviction_score",
             "conviction_tier",
             "close",
+            "stop_loss",
+            "target",
             "rsi",
             "adx",
             "volume_surge",
@@ -382,9 +465,22 @@ if "result_df" in st.session_state:
             row = result_df.set_index("bse_code").loc[selected]
             enriched = st.session_state.enriched_cache.get(selected)
 
+            if row.get("explanation"):
+                st.info(f"**In plain terms:** {row['explanation']}")
+
             score_col, chart_col = st.columns([1, 3])
             with score_col:
                 st.metric("Conviction score", f"{row['conviction_score']:.1f}", row["conviction_tier"])
+
+                if pd.notna(row.get("stop_loss")) and pd.notna(row.get("target")):
+                    risk_col, reward_col = st.columns(2)
+                    risk_col.metric("Suggested stop", f"₹{row['stop_loss']:.2f}", f"-{row['risk_pct']:.1f}%")
+                    reward_col.metric("Suggested target", f"₹{row['target']:.2f}", f"+{row['reward_pct']:.1f}%")
+                    st.caption(
+                        "ATR-based (1.5x risk / 3x reward from close) - a starting frame, "
+                        "not a recommendation. Size and confirm your own risk before entering."
+                    )
+
                 for label, key in [
                     ("Trend", "score_trend"),
                     ("Momentum", "score_momentum"),
