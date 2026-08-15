@@ -32,9 +32,9 @@ print(f"instrument_type counts: {instrument_types}")
 bse_eq = [row for row in bse if row["instrument_type"] == "EQ"]
 print(f"Rows with instrument_type == 'EQ': {len(bse_eq)}\n")
 
-print("First 8 raw EQ rows (tradingsymbol / name / segment / exchange):")
+print("First 8 raw EQ rows (all fields):")
 for row in bse_eq[:8]:
-    print(f"  tradingsymbol={row['tradingsymbol']!r:15} name={row['name']!r:35} segment={row.get('segment')!r} exchange={row.get('exchange')!r}")
+    print(f"  {row}")
 
 print()
 universe = load_universe()
@@ -42,7 +42,7 @@ sample_codes = universe["bse_code"].head(10).tolist()
 print(f"First 10 BSE codes from your CSV: {sample_codes}\n")
 
 by_symbol = {row["tradingsymbol"]: row for row in bse_eq}
-print("Direct lookup of those codes against tradingsymbol:")
+print("Direct lookup of those codes against tradingsymbol (expected to fail, already confirmed):")
 hits = 0
 for code in sample_codes:
     match = by_symbol.get(code)
@@ -53,12 +53,24 @@ for code in sample_codes:
         print(f"  {code} -> no match")
 print(f"\n{hits}/10 matched directly.\n")
 
-print("Searching by company name instead, for a few well-known ones:")
+print("Testing hypothesis: exchange_token == BSE scrip code, for those same 10 codes:")
+by_exchange_token = {str(row["exchange_token"]): row for row in bse_eq}
+hits2 = 0
+for code in sample_codes:
+    match = by_exchange_token.get(str(code))
+    if match:
+        hits2 += 1
+        print(f"  {code} -> MATCH via exchange_token: tradingsymbol={match['tradingsymbol']!r} name={match['name']!r}")
+    else:
+        print(f"  {code} -> no match via exchange_token")
+print(f"\n{hits2}/10 matched via exchange_token.\n")
+
+print("Searching by company name instead, for a few well-known ones (showing exchange_token too):")
 for needle in ["RELIANCE", "HDFC BANK", "ICICI BANK", "TATA STEEL"]:
     found = [row for row in bse_eq if needle in row["name"].upper()][:3]
     print(f"  '{needle}':")
     for row in found:
-        print(f"      tradingsymbol={row['tradingsymbol']!r} name={row['name']!r} instrument_type={row['instrument_type']!r}")
+        print(f"      tradingsymbol={row['tradingsymbol']!r} exchange_token={row['exchange_token']!r} instrument_token={row['instrument_token']!r} name={row['name']!r}")
     if not found:
         print("      (no rows found containing this name)")
 
