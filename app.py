@@ -59,10 +59,42 @@ if not check_password():
 # Kite login panel - two explicit methods, since the automated TOTP flow can
 # break if Zerodha tweaks their login pages, and the manual flow can't use a
 # blocking input() prompt inside Streamlit like the CLI does.
+#
+# Streamlit resets st.session_state on every new browser tab/session, so
+# without this, you'd have to click through a login every single time you
+# open the app - even minutes after someone else (or you, in another tab)
+# already logged in today. @st.cache_resource is shared across ALL sessions
+# hitting this same running app process, so the very first successful
+# login of the day is reused silently by everyone until it expires -
+# no button click needed for the common case.
 # ---------------------------------------------------------------------------
+@st.cache_resource(ttl=1800, show_spinner=False)
+def _shared_auto_kite_client(cache_key: str):
+    creds = KiteCredentials()
+    cached_token = load_cached_access_token()
+    if cached_token and creds.api_key:
+        kite = new_kite_client(creds.api_key)
+        kite.set_access_token(cached_token)
+        return kite
+    if not creds.is_complete():
+        return None
+    try:
+        return login_automated(creds)
+    except AuthError:
+        # Cached as "unavailable" for the ttl window too, so a blocked/failed
+        # attempt doesn't get retried on every single widget interaction.
+        return None
+
+
 def render_login_panel() -> None:
     st.sidebar.header("Kite Connect Login")
     creds = KiteCredentials()
+
+    if "kite" not in st.session_state:
+        auto_kite = _shared_auto_kite_client(datetime.now().strftime("%Y-%m-%d-%H"))
+        if auto_kite is not None:
+            st.session_state.kite = auto_kite
+            st.session_state.login_method = "auto"
 
     if "kite" in st.session_state:
         st.sidebar.success(f"Logged in ({st.session_state.get('login_method', 'unknown')})")
