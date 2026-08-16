@@ -52,6 +52,23 @@ def new_kite_client(api_key: str) -> KiteConnect:
     return KiteConnect(api_key=api_key, timeout=KITE_HTTP_TIMEOUT)
 
 
+def _raise_for_status_with_detail(resp: requests.Response, step: str) -> None:
+    """requests' default raise_for_status() gives no context on *why* a
+    call failed - wrap it so a blocked/rate-limited automated login shows
+    the actual status code and response body instead of a bare traceback."""
+    try:
+        resp.raise_for_status()
+    except requests.HTTPError as exc:
+        raise AuthError(
+            f"Kite {step} step returned HTTP {resp.status_code}: {resp.text[:300]!r}. "
+            "This can happen when Zerodha blocks automated login attempts from a "
+            "cloud/datacenter IP (e.g. Streamlit Cloud) as an anti-bot measure - "
+            "if you're seeing this on a cloud deployment but not locally, use the "
+            "'Manual (paste token)' login method instead, which only calls Kite's "
+            "official Connect API rather than mimicking the browser login flow."
+        ) from exc
+
+
 def _cache_is_fresh(cache: dict) -> bool:
     """Kite access tokens expire around 06:00-08:00 IST the next day.
     We conservatively treat a cached token as stale once the calendar
@@ -109,7 +126,7 @@ def login_automated(creds: KiteCredentials | None = None, timeout: int = 15) -> 
         data={"user_id": creds.user_id, "password": creds.password},
         timeout=timeout,
     )
-    login_resp.raise_for_status()
+    _raise_for_status_with_detail(login_resp, "login")
     login_data = login_resp.json()
     if login_data.get("status") != "success":
         raise AuthError(f"Kite login step failed: {login_data}")
@@ -126,7 +143,7 @@ def login_automated(creds: KiteCredentials | None = None, timeout: int = 15) -> 
         },
         timeout=timeout,
     )
-    twofa_resp.raise_for_status()
+    _raise_for_status_with_detail(twofa_resp, "TOTP")
     twofa_data = twofa_resp.json()
     if twofa_data.get("status") != "success":
         raise AuthError(
