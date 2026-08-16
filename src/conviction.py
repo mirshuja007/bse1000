@@ -120,6 +120,53 @@ def compute_pivot_distance_pct(snap: dict) -> float:
     return snap.get("pct_above_sma50", 0) or 0
 
 
+def _build_explanation(snap: dict, rsi_overbought_threshold: float) -> str:
+    """Turn the same signals the score is built from into a short plain-
+    English paragraph, so the conviction score isn't just a bare number -
+    someone without a technical-analysis background can read this and
+    understand why a stock ranked where it did."""
+    sentences: list[str] = []
+
+    surge = snap.get("volume_surge") or 0
+    vol_clause = f" on {surge:.1f}x average volume" if surge >= 1.3 else ""
+    if snap.get("donchian_breakout"):
+        sentences.append(f"Broke out to a fresh multi-week high{vol_clause}.")
+    elif snap.get("dma50_breakout_recent"):
+        sentences.append(f"Recently reclaimed its 50-day moving average{vol_clause}.")
+    elif vol_clause:
+        sentences.append(f"Trading{vol_clause}, though without a fresh breakout trigger.")
+
+    if snap.get("golden_cross") and snap.get("price_above_200"):
+        sentences.append("Trading above both its 50- and 200-day averages in an established uptrend.")
+    elif snap.get("price_above_50") and not snap.get("price_above_200"):
+        sentences.append("Above its short-term trend but still below its longer-term 200-day average.")
+    elif not snap.get("price_above_50"):
+        sentences.append("Currently below its 50-day average - short-term momentum has cooled.")
+
+    rsi = snap.get("rsi")
+    if rsi is not None and rsi == rsi:  # not NaN
+        if rsi > rsi_overbought_threshold:
+            sentences.append(f"RSI of {rsi:.0f} is deeply overbought, raising pullback risk.")
+        elif rsi >= 60:
+            sentences.append(f"RSI of {rsi:.0f} shows strong, healthy momentum.")
+        elif rsi >= 50:
+            sentences.append(f"RSI of {rsi:.0f} shows momentum building but not yet strong.")
+        else:
+            sentences.append(f"RSI of {rsi:.0f} shows little momentum right now.")
+
+    rel = snap.get("relative_return_20d")
+    if rel is not None and rel == rel:
+        if rel > 5:
+            sentences.append(f"Outperforming the broader market by {rel:.1f}% over the past month.")
+        elif rel < -5:
+            sentences.append(f"Lagging the broader market by {abs(rel):.1f}% over the past month.")
+
+    if not sentences:
+        sentences.append("No standout momentum signal right now - sitting in a neutral zone.")
+
+    return " ".join(sentences)
+
+
 @dataclass
 class ConvictionResult:
     trend: float
@@ -132,6 +179,7 @@ class ConvictionResult:
     total: float
     tier: str
     notes: list[str] = field(default_factory=list)
+    explanation: str = ""
 
 
 def compute_conviction(snap: dict, sector_strength_score: float, config: dict) -> ConvictionResult:
@@ -190,6 +238,8 @@ def compute_conviction(snap: dict, sector_strength_score: float, config: dict) -
     if not snap.get("rs_new_high", False):
         notes.append("Not yet at a new relative-strength high vs benchmark - lagging the tape.")
 
+    explanation = _build_explanation(snap, rsi_cfg["threshold"])
+
     return ConvictionResult(
         trend=trend,
         momentum=momentum,
@@ -201,4 +251,5 @@ def compute_conviction(snap: dict, sector_strength_score: float, config: dict) -
         total=total,
         tier=tier,
         notes=notes,
+        explanation=explanation,
     )

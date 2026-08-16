@@ -36,6 +36,26 @@ def compute_sector_strength(snapshots: dict[str, dict], mapping: pd.DataFrame) -
     return percentile_score
 
 
+def compute_risk_levels(snap: dict, config: dict) -> dict:
+    """ATR-based suggested stop-loss/target, so a ranked candidate comes
+    with an actionable entry/exit frame instead of just a score. Not a
+    recommendation to size or place any specific trade."""
+    close = snap.get("close")
+    atr = snap.get("atr")
+    if not close or not atr or atr != atr:  # missing or NaN
+        return {"stop_loss": None, "target": None, "risk_pct": None, "reward_pct": None}
+
+    risk_cfg = config["risk"]
+    stop_loss = close - risk_cfg["atr_stop_multiplier"] * atr
+    target = close + risk_cfg["atr_target_multiplier"] * atr
+    return {
+        "stop_loss": round(stop_loss, 2),
+        "target": round(target, 2),
+        "risk_pct": round((close - stop_loss) / close * 100, 2),
+        "reward_pct": round((target - close) / close * 100, 2),
+    }
+
+
 def passes_filters(snap: dict, config: dict) -> tuple[bool, list[str]]:
     f = config["filters"]
     reasons = []
@@ -125,6 +145,7 @@ def run_scan(
         sector = sector_by_code.get(code, "Unclassified")
         passed, fail_reasons = passes_filters(snap, config)
         result = compute_conviction(snap, sector_scores.get(sector, 50.0), config)
+        risk = compute_risk_levels(snap, config)
 
         rows.append(
             {
@@ -161,6 +182,11 @@ def run_scan(
                 "score_sector_strength": round(result.sector_strength, 1),
                 "penalties": result.penalties,
                 "notes": " | ".join(result.notes),
+                "explanation": result.explanation,
+                "stop_loss": risk["stop_loss"],
+                "target": risk["target"],
+                "risk_pct": risk["risk_pct"],
+                "reward_pct": risk["reward_pct"],
             }
         )
 
