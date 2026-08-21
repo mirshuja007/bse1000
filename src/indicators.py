@@ -91,6 +91,87 @@ def donchian_high(high: pd.Series, period: int = 20) -> pd.Series:
     return high.shift(1).rolling(period, min_periods=period).max()
 
 
+def supertrend(df: pd.DataFrame, period: int = 10, multiplier: float = 3.0) -> pd.DataFrame:
+    """Supertrend: an ATR-based trend/trailing-stop line (Olivier Seban).
+
+    Basic bands are the textbook formula: midpoint +/- multiplier*ATR. On
+    their own those basic bands are noisy - the indicator's actual behavior
+    (the smooth, sticky line every platform shows) comes from a second,
+    recursive step most summaries skip: each *final* band only ever moves
+    in the direction that tightens around price (never loosens), and the
+    line itself only flips from tracking the upper band to the lower band
+    (or back) when price actually closes through it. That flip is what
+    "bullish"/"bearish" means below.
+
+    Uses this module's Wilder-smoothed ATR (the modern-platform default for
+    Supertrend), not a plain moving average of true range.
+
+    Returns a DataFrame aligned to `df`'s index with:
+      - supertrend: the line's price level
+      - supertrend_bullish: True while the line is acting as support below
+        price (uptrend / green), False while it's resistance above price
+        (downtrend / red)
+    """
+    atr_series = atr(df, period)
+    mid = (df["high"] + df["low"]) / 2
+    basic_upper = (mid + multiplier * atr_series).to_numpy()
+    basic_lower = (mid - multiplier * atr_series).to_numpy()
+    close = df["close"].to_numpy()
+
+    n = len(df)
+    final_upper = np.full(n, np.nan)
+    final_lower = np.full(n, np.nan)
+    line = np.full(n, np.nan)
+    bullish = np.zeros(n, dtype=bool)
+
+    first_valid = period  # ATR's min_periods=period, so bands are NaN before this
+    if first_valid >= n:
+        return pd.DataFrame({"supertrend": line, "supertrend_bullish": bullish}, index=df.index)
+
+    final_upper[first_valid] = basic_upper[first_valid]
+    final_lower[first_valid] = basic_lower[first_valid]
+    line[first_valid] = final_upper[first_valid]
+    bullish[first_valid] = False
+
+    for i in range(first_valid + 1, n):
+        if np.isnan(basic_upper[i]) or np.isnan(basic_lower[i]):
+            continue
+
+        final_upper[i] = (
+            basic_upper[i]
+            if (basic_upper[i] < final_upper[i - 1] or close[i - 1] > final_upper[i - 1])
+            else final_upper[i - 1]
+        )
+        final_lower[i] = (
+            basic_lower[i]
+            if (basic_lower[i] > final_lower[i - 1] or close[i - 1] < final_lower[i - 1])
+            else final_lower[i - 1]
+        )
+
+        if line[i - 1] == final_upper[i - 1]:
+            if close[i] <= final_upper[i]:
+                line[i], bullish[i] = final_upper[i], False
+            else:
+                line[i], bullish[i] = final_lower[i], True
+        else:
+            if close[i] >= final_lower[i]:
+                line[i], bullish[i] = final_lower[i], True
+            else:
+                line[i], bullish[i] = final_upper[i], False
+
+    return pd.DataFrame({"supertrend": line, "supertrend_bullish": bullish}, index=df.index)
+
+
+def flipped_bullish_within(bullish: pd.Series, lookback: int) -> pd.Series:
+    """True on any day where `bullish` turned True (a red-to-green flip) at
+    some point in the trailing `lookback` sessions (inclusive of today) -
+    the actual entry-timing trigger, as opposed to merely "currently
+    bullish" which says nothing about how stale the signal is."""
+    prev = bullish.shift(1, fill_value=False)
+    flipped = bullish & ~prev
+    return flipped.rolling(lookback, min_periods=1).max().astype(bool)
+
+
 def obv(df: pd.DataFrame) -> pd.Series:
     direction = np.sign(df["close"].diff()).fillna(0)
     return (direction * df["volume"]).cumsum()
@@ -139,6 +220,7 @@ def compute_indicators(df: pd.DataFrame, config: dict, benchmark: pd.DataFrame |
     turnover_lookback = config["filters"]["liquidity"]["turnover_lookback"]
     dma50_lookback = config["filters"]["dma50_breakout"]["lookback_days"]
     dma200_lookback = config["filters"]["dma200_breakout"]["lookback_days"]
+    st_cfg = config["filters"]["supertrend"]
 
     out["sma50"] = sma(out["close"], 50)
     out["sma200"] = sma(out["close"], 200)
@@ -154,6 +236,13 @@ def compute_indicators(df: pd.DataFrame, config: dict, benchmark: pd.DataFrame |
 
     out["donchian_high"] = donchian_high(out["high"], donchian_period)
     out["donchian_breakout"] = out["close"] > out["donchian_high"]
+
+    st_df = supertrend(out, st_cfg["period"], st_cfg["multiplier"])
+    out["supertrend"] = st_df["supertrend"]
+    out["supertrend_bullish"] = st_df["supertrend_bullish"]
+    out["supertrend_flip_recent"] = flipped_bullish_within(
+        out["supertrend_bullish"], st_cfg["flip_lookback_days"]
+    )
 
     out["obv"] = obv(out)
     out["obv_slope20"] = out["obv"].diff(20)

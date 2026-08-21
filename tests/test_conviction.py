@@ -18,6 +18,8 @@ def base_snapshot(**overrides) -> dict:
         "donchian_breakout": True,
         "donchian_high": 104.0,
         "dma50_breakout_recent": True,
+        "supertrend_bullish": True,
+        "supertrend_flip_recent": True,
         "atr_pct_chg20": -0.5,
         "close_strength": 0.8,
         "rs_new_high": True,
@@ -34,8 +36,16 @@ def test_score_trend_perfect():
 
 
 def test_score_trend_zero_when_all_false():
-    snap = base_snapshot(price_above_50=False, price_above_200=False, golden_cross=False)
+    snap = base_snapshot(
+        price_above_50=False, price_above_200=False, golden_cross=False, supertrend_bullish=False
+    )
     assert score_trend(snap) == 0.0
+
+
+def test_score_trend_credits_supertrend_bullish():
+    with_st = score_trend(base_snapshot(supertrend_bullish=True))
+    without_st = score_trend(base_snapshot(supertrend_bullish=False))
+    assert with_st > without_st
 
 
 def test_momentum_peaks_in_ideal_rsi_zone():
@@ -127,6 +137,8 @@ def test_weak_setup_lands_in_watchlist():
         obv_slope20=-500,
         donchian_breakout=False,
         dma50_breakout_recent=False,
+        supertrend_bullish=False,
+        supertrend_flip_recent=False,
         rs_new_high=False,
         relative_return_20d=-5,
     )

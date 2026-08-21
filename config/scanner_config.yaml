@@ -65,6 +65,12 @@ filters:
     period: 14
     min_adx: 20                    # trend strength floor
 
+  supertrend:
+    enabled: true
+    period: 10                     # ATR period (standard default across platforms)
+    multiplier: 3.0                # ATR multiplier - lower = more reactive/more signals
+    flip_lookback_days: 3          # only count a red->green flip within this many days as a fresh trigger
+
 # ---------------------------------------------------------------------------
 # Conviction scoring - weighted, transparent, fully rule-based (no black-box
 # ML claims). Category weights must sum to 100. Each category score is 0-100

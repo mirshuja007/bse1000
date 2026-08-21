@@ -20,3 +20,12 @@ def test_compute_risk_levels_handles_missing_atr():
     risk = compute_risk_levels(snap, config)
     assert risk["stop_loss"] is None
     assert risk["target"] is None
+
+
+def test_compute_risk_levels_includes_supertrend_stop_only_when_bullish():
+    config = load_config()
+    bullish_snap = {"close": 100.0, "atr": 4.0, "supertrend": 92.5, "supertrend_bullish": True}
+    assert compute_risk_levels(bullish_snap, config)["supertrend_stop"] == 92.5
+
+    bearish_snap = {"close": 100.0, "atr": 4.0, "supertrend": 107.0, "supertrend_bullish": False}
+    assert compute_risk_levels(bearish_snap, config)["supertrend_stop"] is None

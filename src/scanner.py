@@ -39,21 +39,35 @@ def compute_sector_strength(snapshots: dict[str, dict], mapping: pd.DataFrame) -
 def compute_risk_levels(snap: dict, config: dict) -> dict:
     """ATR-based suggested stop-loss/target, so a ranked candidate comes
     with an actionable entry/exit frame instead of just a score. Not a
-    recommendation to size or place any specific trade."""
+    recommendation to size or place any specific trade.
+
+    Also surfaces the Supertrend line itself as an alternative trailing
+    stop when the stock is currently in a bullish Supertrend regime - a
+    dynamic, trend-following stop that widens/tightens with volatility,
+    as opposed to the fixed ATR-multiple stop above. Shown alongside it,
+    not in place of it."""
     close = snap.get("close")
     atr = snap.get("atr")
     if not close or not atr or atr != atr:  # missing or NaN
-        return {"stop_loss": None, "target": None, "risk_pct": None, "reward_pct": None}
+        result = {"stop_loss": None, "target": None, "risk_pct": None, "reward_pct": None}
+    else:
+        risk_cfg = config["risk"]
+        stop_loss = close - risk_cfg["atr_stop_multiplier"] * atr
+        target = close + risk_cfg["atr_target_multiplier"] * atr
+        result = {
+            "stop_loss": round(stop_loss, 2),
+            "target": round(target, 2),
+            "risk_pct": round((close - stop_loss) / close * 100, 2),
+            "reward_pct": round((target - close) / close * 100, 2),
+        }
 
-    risk_cfg = config["risk"]
-    stop_loss = close - risk_cfg["atr_stop_multiplier"] * atr
-    target = close + risk_cfg["atr_target_multiplier"] * atr
-    return {
-        "stop_loss": round(stop_loss, 2),
-        "target": round(target, 2),
-        "risk_pct": round((close - stop_loss) / close * 100, 2),
-        "reward_pct": round((target - close) / close * 100, 2),
-    }
+    supertrend_stop = snap.get("supertrend")
+    if snap.get("supertrend_bullish") and supertrend_stop is not None and supertrend_stop == supertrend_stop:
+        result["supertrend_stop"] = round(supertrend_stop, 2)
+    else:
+        result["supertrend_stop"] = None
+
+    return result
 
 
 def passes_filters(snap: dict, config: dict) -> tuple[bool, list[str]]:
@@ -105,6 +119,10 @@ def passes_filters(snap: dict, config: dict) -> tuple[bool, list[str]]:
         adx_val = snap.get("adx")
         if adx_val is None or adx_val != adx_val or adx_val < f["adx"]["min_adx"]:
             reasons.append("adx_below_min")
+
+    if f["supertrend"]["enabled"]:
+        if not snap.get("supertrend_flip_recent"):
+            reasons.append("no_recent_supertrend_flip")
 
     return (len(reasons) == 0, reasons)
 
@@ -165,6 +183,8 @@ def run_scan(
                 "donchian_breakout": snap.get("donchian_breakout"),
                 "dma50_breakout_recent": snap.get("dma50_breakout_recent"),
                 "dma200_breakout_recent": snap.get("dma200_breakout_recent"),
+                "supertrend_bullish": snap.get("supertrend_bullish"),
+                "supertrend_flip_recent": snap.get("supertrend_flip_recent"),
                 "golden_cross": snap.get("golden_cross"),
                 "relative_return_20d": snap.get("relative_return_20d"),
                 "rs_new_high": snap.get("rs_new_high"),
@@ -187,6 +207,7 @@ def run_scan(
                 "target": risk["target"],
                 "risk_pct": risk["risk_pct"],
                 "reward_pct": risk["reward_pct"],
+                "supertrend_stop": risk["supertrend_stop"],
             }
         )
 

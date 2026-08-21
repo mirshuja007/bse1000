@@ -185,6 +185,7 @@ SWING_PRESET = {
         "rsi": {"min_rsi": 55, "max_rsi": 85, "flag_above": 70},
         "donchian_breakout": {"period": 15},
         "adx": {"min_adx": 18},
+        "supertrend": {"period": 7, "multiplier": 2.0, "flip_lookback_days": 2},
     },
     "conviction": {
         "weights": {
@@ -210,6 +211,7 @@ POSITIONAL_PRESET = {
         "rsi": {"min_rsi": 60, "max_rsi": 80, "flag_above": 70},
         "donchian_breakout": {"period": 50},
         "adx": {"min_adx": 22},
+        "supertrend": {"period": 10, "multiplier": 3.0, "flip_lookback_days": 5},
     },
     "conviction": {
         "weights": {
@@ -320,6 +322,24 @@ def sidebar_controls(cfg: dict) -> dict:
     cfg["filters"]["adx"]["enabled"] = st.sidebar.checkbox("Enable ADX filter", cfg["filters"]["adx"]["enabled"])
     cfg["filters"]["adx"]["min_adx"] = st.sidebar.slider(
         "Min ADX (trend strength)", 0, 50, int(cfg["filters"]["adx"]["min_adx"])
+    )
+
+    st.sidebar.subheader("Supertrend")
+    cfg["filters"]["supertrend"]["enabled"] = st.sidebar.checkbox(
+        "Require a recent bullish Supertrend flip", cfg["filters"]["supertrend"]["enabled"]
+    )
+    cfg["filters"]["supertrend"]["period"] = st.sidebar.slider(
+        "Supertrend ATR period", 5, 20, int(cfg["filters"]["supertrend"]["period"])
+    )
+    cfg["filters"]["supertrend"]["multiplier"] = st.sidebar.slider(
+        "Supertrend ATR multiplier", 1.0, 5.0, float(cfg["filters"]["supertrend"]["multiplier"]), 0.5
+    )
+    cfg["filters"]["supertrend"]["flip_lookback_days"] = st.sidebar.slider(
+        "Count a flip as \"fresh\" within (days)", 1, 15, int(cfg["filters"]["supertrend"]["flip_lookback_days"])
+    )
+    st.sidebar.caption(
+        "Lower period/multiplier = more reactive, more signals (better for short swings). "
+        "Higher = smoother, fewer but more established signals (better for positional holds)."
     )
 
     st.sidebar.header("Conviction score weights")
@@ -476,6 +496,8 @@ if "result_df" in st.session_state:
             "roc10",
             "relative_return_20d",
             "donchian_breakout",
+            "supertrend_bullish",
+            "supertrend_flip_recent",
             "notes",
         ]
         st.dataframe(view[display_cols], use_container_width=True, height=450)
@@ -513,6 +535,13 @@ if "result_df" in st.session_state:
                         "not a recommendation. Size and confirm your own risk before entering."
                     )
 
+                if pd.notna(row.get("supertrend_stop")):
+                    st.metric("Supertrend trailing stop", f"₹{row['supertrend_stop']:.2f}")
+                    st.caption(
+                        "Follows price up as the trend continues; a daily close below this "
+                        "line is the Supertrend's signal to exit or trail your stop tighter."
+                    )
+
                 for label, key in [
                     ("Trend", "score_trend"),
                     ("Momentum", "score_momentum"),
@@ -546,6 +575,23 @@ if "result_df" in st.session_state:
                     )
                     fig.add_trace(go.Scatter(x=tail["date"], y=tail["sma50"], name="50DMA", line=dict(width=1.5)), row=1, col=1)
                     fig.add_trace(go.Scatter(x=tail["date"], y=tail["sma200"], name="200DMA", line=dict(width=1.5)), row=1, col=1)
+                    if "supertrend" in tail.columns:
+                        st_bullish = tail["supertrend"].where(tail["supertrend_bullish"])
+                        st_bearish = tail["supertrend"].where(~tail["supertrend_bullish"])
+                        fig.add_trace(
+                            go.Scatter(
+                                x=tail["date"], y=st_bullish, name="Supertrend (bullish)",
+                                line=dict(width=1.5, color="green"), connectgaps=False,
+                            ),
+                            row=1, col=1,
+                        )
+                        fig.add_trace(
+                            go.Scatter(
+                                x=tail["date"], y=st_bearish, name="Supertrend (bearish)",
+                                line=dict(width=1.5, color="red"), connectgaps=False,
+                            ),
+                            row=1, col=1,
+                        )
                     fig.add_trace(go.Bar(x=tail["date"], y=tail["volume"], name="Volume"), row=2, col=1)
                     fig.add_trace(go.Scatter(x=tail["date"], y=tail["rsi"], name="RSI"), row=3, col=1)
                     fig.add_hline(y=70, line_dash="dot", row=3, col=1)

@@ -39,11 +39,13 @@ def _linear(value: float, x0: float, x1: float, y0: float = 0.0, y1: float = 100
 def score_trend(snap: dict) -> float:
     score = 0.0
     if snap.get("price_above_50"):
-        score += 40
+        score += 30
     if snap.get("price_above_200"):
-        score += 30
+        score += 25
     if snap.get("golden_cross"):
-        score += 30
+        score += 25
+    if snap.get("supertrend_bullish"):
+        score += 20
     return _clip(score)
 
 
@@ -91,12 +93,14 @@ def score_volume(snap: dict) -> float:
 def score_breakout_quality(snap: dict) -> float:
     score = 0.0
     if snap.get("donchian_breakout"):
-        score += 50
+        score += 40
     if snap.get("dma50_breakout_recent"):
-        score += 25
+        score += 20
+    if snap.get("supertrend_flip_recent"):
+        score += 20  # fresh red->green Supertrend flip, not just "currently bullish"
     atr_chg = snap.get("atr_pct_chg20", 0) or 0
     if atr_chg < 0:
-        score += 15  # volatility was contracting into this move
+        score += 10  # volatility was contracting into this move
     close_strength = snap.get("close_strength", 0) or 0
     score += _clip(close_strength * 10, 0, 10)
     return _clip(score)
@@ -135,6 +139,13 @@ def _build_explanation(snap: dict, rsi_overbought_threshold: float) -> str:
         sentences.append(f"Recently reclaimed its 50-day moving average{vol_clause}.")
     elif vol_clause:
         sentences.append(f"Trading{vol_clause}, though without a fresh breakout trigger.")
+
+    if snap.get("supertrend_flip_recent"):
+        sentences.append("Supertrend just flipped bullish - a fresh trend-following buy signal.")
+    elif snap.get("supertrend_bullish"):
+        sentences.append("Supertrend remains in a bullish regime (green), though not a fresh flip.")
+    else:
+        sentences.append("Supertrend is bearish (red) - the trend-following signal isn't confirming yet.")
 
     if snap.get("golden_cross") and snap.get("price_above_200"):
         sentences.append("Trading above both its 50- and 200-day averages in an established uptrend.")
