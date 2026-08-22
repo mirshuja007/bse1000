@@ -233,6 +233,15 @@ PRESET_LABELS = {
     "Positional (8-15 days)": POSITIONAL_PRESET,
 }
 
+# Presets for what to overlay on the Stock Detail price chart - independent
+# of the scan-side trading-style preset above, since which lines are useful
+# to look at is a matter of personal chart-reading taste, not strategy.
+CHART_VIEW_PRESETS = {
+    "Full (DMAs + Supertrend)": {"dma": True, "supertrend": True},
+    "Supertrend focus": {"dma": False, "supertrend": True},
+    "DMA focus": {"dma": True, "supertrend": False},
+}
+
 
 def render_preset_selector() -> None:
     st.sidebar.header("Trading style preset")
@@ -557,13 +566,28 @@ if "result_df" in st.session_state:
             with chart_col:
                 if enriched is not None and not enriched.empty:
                     tail = enriched.tail(150)
+
+                    chart_view = st.radio(
+                        "Chart overlays",
+                        list(CHART_VIEW_PRESETS.keys()),
+                        horizontal=True,
+                        key="chart_view_preset",
+                    )
+                    show_dma = CHART_VIEW_PRESETS[chart_view]["dma"]
+                    show_supertrend = CHART_VIEW_PRESETS[chart_view]["supertrend"] and "supertrend" in tail.columns
+
+                    price_title = " / ".join(
+                        ["Price"]
+                        + (["50DMA", "200DMA"] if show_dma else [])
+                        + (["Supertrend"] if show_supertrend else [])
+                    )
                     fig = make_subplots(
                         rows=3,
                         cols=1,
                         shared_xaxes=True,
                         row_heights=[0.55, 0.2, 0.25],
                         vertical_spacing=0.03,
-                        subplot_titles=("Price / 50DMA / 200DMA", "Volume", "RSI"),
+                        subplot_titles=(price_title, "Volume", "RSI"),
                     )
                     fig.add_trace(
                         go.Candlestick(
@@ -573,9 +597,10 @@ if "result_df" in st.session_state:
                         row=1,
                         col=1,
                     )
-                    fig.add_trace(go.Scatter(x=tail["date"], y=tail["sma50"], name="50DMA", line=dict(width=1.5)), row=1, col=1)
-                    fig.add_trace(go.Scatter(x=tail["date"], y=tail["sma200"], name="200DMA", line=dict(width=1.5)), row=1, col=1)
-                    if "supertrend" in tail.columns:
+                    if show_dma:
+                        fig.add_trace(go.Scatter(x=tail["date"], y=tail["sma50"], name="50DMA", line=dict(width=1.5)), row=1, col=1)
+                        fig.add_trace(go.Scatter(x=tail["date"], y=tail["sma200"], name="200DMA", line=dict(width=1.5)), row=1, col=1)
+                    if show_supertrend:
                         st_bullish = tail["supertrend"].where(tail["supertrend_bullish"])
                         st_bearish = tail["supertrend"].where(~tail["supertrend_bullish"])
                         fig.add_trace(
