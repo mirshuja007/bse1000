@@ -702,8 +702,10 @@ if "result_df" in st.session_state:
         else:
             st.info("No stocks match the current filters/score threshold.")
 else:
-    st.info("Click **Run scan** to fetch live data from Kite and score the BSE 1000 universe.")
+    st.info("Click **Run scan** to fetch live data from Kite and score the selected universe.")
     st.caption(
-        "First run will also build the BSE→Kite instrument mapping (data/universe_mapping.csv). "
-        "Review that file afterwards for any low match_confidence rows."
+        "First run will also build the instrument mapping for whichever universe(s) you picked above "
+        "(data/universe_mapping.csv for BSE 1000, data/nifty500_mapping.csv for Nifty 500). "
+        "Nifty 500 resolves by exact NSE symbol match; only the BSE 1000 mapping needs a "
+        "match_confidence review, since it relies on fuzzy name matching."
     )
