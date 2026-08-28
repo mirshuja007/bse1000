@@ -17,7 +17,7 @@ from pathlib import Path
 from src.auth import get_authenticated_kite
 from src.config import REPO_ROOT, load_config
 from src.data_fetcher import fetch_benchmark_history, fetch_universe_history, resolve_benchmark_token
-from src.instruments import build_universe_mapping, load_mapping
+from src.instruments import build_nse_mapping, build_universe_mapping, combine_mappings, load_mapping, load_nse_mapping
 from src.scanner import run_scan
 
 
@@ -26,6 +26,12 @@ def main() -> None:
     parser.add_argument("--config", default=None)
     parser.add_argument("--candidates-only", action="store_true")
     parser.add_argument("--refresh-mapping", action="store_true")
+    parser.add_argument(
+        "--universe",
+        choices=["bse1000", "nifty500", "both"],
+        default="bse1000",
+        help="Which constituent universe(s) to scan (default: bse1000).",
+    )
     parser.add_argument("--top", type=int, default=25)
     args = parser.parse_args()
 
@@ -35,10 +41,20 @@ def main() -> None:
     kite = get_authenticated_kite()
 
     print("Resolving universe -> Kite instruments...")
-    if args.refresh_mapping:
-        mapping = build_universe_mapping(kite, force_refresh_instruments=True)
-    else:
-        mapping = load_mapping(refresh_with_kite=kite)
+    mappings = []
+    if args.universe in ("bse1000", "both"):
+        mappings.append(
+            build_universe_mapping(kite, force_refresh_instruments=True)
+            if args.refresh_mapping
+            else load_mapping(refresh_with_kite=kite)
+        )
+    if args.universe in ("nifty500", "both"):
+        mappings.append(
+            build_nse_mapping(kite, force_refresh_instruments=True)
+            if args.refresh_mapping
+            else load_nse_mapping(refresh_with_kite=kite)
+        )
+    mapping = combine_mappings(*mappings)
     resolved = mapping[mapping["resolved"] == True]  # noqa: E712
     print(f"  {len(resolved)}/{len(mapping)} constituents resolved to a tradable instrument.")
     low_conf = resolved[resolved["match_confidence"] < 0.9]
@@ -64,7 +80,7 @@ def main() -> None:
         progress_callback=progress,
     )
 
-    history = {r.bse_code: r.bars for r in results if r.ok}
+    history = {r.security_code: r.bars for r in results if r.ok}
     failed = [r for r in results if not r.ok]
     if failed:
         print(f"  {len(failed)} stocks failed to fetch (see logs) - continuing with the rest.")

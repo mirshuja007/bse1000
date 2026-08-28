@@ -41,7 +41,7 @@ class RateLimiter:
 
 @dataclass
 class FetchResult:
-    bse_code: str
+    security_code: str
     tradingsymbol: str
     exchange: str
     ok: bool
@@ -141,9 +141,9 @@ def fetch_universe_history(
                 cache_dir,
                 cache_ttl_hours,
             )
-            return FetchResult(row["bse_code"], row["tradingsymbol"], row["exchange"], True, df)
+            return FetchResult(row["security_code"], row["tradingsymbol"], row["exchange"], True, df)
         except Exception as exc:
-            return FetchResult(row["bse_code"], row["tradingsymbol"], row["exchange"], False, None, str(exc))
+            return FetchResult(row["security_code"], row["tradingsymbol"], row["exchange"], False, None, str(exc))
 
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {pool.submit(_task, row): row for _, row in resolved.iterrows()}

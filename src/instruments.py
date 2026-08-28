@@ -1,7 +1,8 @@
-"""Resolve BSE 1000 constituents to tradable Kite instruments.
+"""Resolve constituents of the supported universes (BSE 1000, Nifty 500) to
+tradable Kite instruments.
 
-Strategy
---------
+BSE 1000 strategy (`build_universe_mapping`)
+---------------------------------------------
 1. Pull Kite's official instrument dumps for the BSE and NSE segments
    (`kite.instruments("BSE")` / `("NSE")`), equity only. These are cached
    locally for `data.cache_dir`-independent reuse (they change rarely).
@@ -22,6 +23,14 @@ Strategy
 4. Emit `data/universe_mapping.csv` (git-ignored) with both tokens, the
    chosen exchange, and a match_confidence column so you can eyeball and
    correct any low-confidence rows before the scanner trusts them.
+
+Nifty 500 strategy (`build_nse_mapping`)
+-----------------------------------------
+NSE's own official constituent list already gives the exact NSE
+tradingsymbol per company - no fuzzy name matching is needed at all, just
+an exact-match join against `kite.instruments("NSE")`. Emits
+`data/nifty500_mapping.csv` (git-ignored), same column shape as the BSE
+mapping so the two can be concatenated by `combine_mappings`.
 """
 from __future__ import annotations
 
@@ -33,10 +42,11 @@ from pathlib import Path
 import pandas as pd
 
 from src.config import REPO_ROOT
-from src.universe import load_universe, normalize_name
+from src.universe import load_nifty500_universe, load_universe, normalize_name
 
 INSTRUMENTS_CACHE_DIR = REPO_ROOT / "data"
 MAPPING_FILE = REPO_ROOT / "data" / "universe_mapping.csv"
+NSE_MAPPING_FILE = REPO_ROOT / "data" / "nifty500_mapping.csv"
 INSTRUMENT_DUMP_TTL_SECONDS = 24 * 3600
 
 
@@ -125,15 +135,16 @@ def build_universe_mapping(
     for _, u in universe.iterrows():
         row = {
             "company_name_raw": u["company_name_raw"],
-            "bse_code": u["bse_code"],
+            "security_code": u["security_code"],
             "sector": u["sector"],
+            "universe": "BSE1000",
         }
 
-        if u["bse_code"] not in bse_by_symbol.index:
+        if u["security_code"] not in bse_by_symbol.index:
             row.update(
                 {
                     "resolved": False,
-                    "reason": "bse_code_not_found_in_kite_dump",
+                    "reason": "security_code_not_found_in_kite_dump",
                     "exchange": None,
                     "tradingsymbol": None,
                     "instrument_token": None,
@@ -143,7 +154,7 @@ def build_universe_mapping(
             rows.append(row)
             continue
 
-        bse_row = bse_by_symbol.loc[u["bse_code"]]
+        bse_row = bse_by_symbol.loc[u["security_code"]]
         if isinstance(bse_row, pd.DataFrame):  # duplicate scrip codes, shouldn't happen normally
             bse_row = bse_row.iloc[0]
 
@@ -194,4 +205,115 @@ def load_mapping(refresh_with_kite=None) -> pd.DataFrame:
                 "`build_universe_mapping(kite)` once (see README) to generate it."
             )
         return build_universe_mapping(refresh_with_kite)
-    return pd.read_csv(MAPPING_FILE, dtype={"bse_code": str})
+    return pd.read_csv(MAPPING_FILE, dtype={"security_code": str})
+
+
+def _resolve_nifty500_universe(universe: pd.DataFrame, nse_df: pd.DataFrame) -> pd.DataFrame:
+    """Pure exact-match join of the Nifty 500 universe against an already-
+    loaded NSE instrument dump - no Kite calls, no file I/O, so it's cheap
+    to unit test directly with synthetic DataFrames."""
+    nse_by_symbol = nse_df.set_index("tradingsymbol", drop=False)
+
+    rows = []
+    for _, u in universe.iterrows():
+        row = {
+            "company_name_raw": u["company_name_raw"],
+            "security_code": u["security_code"],
+            "sector": u["sector"],
+            "universe": "NIFTY500",
+        }
+
+        if u["security_code"] not in nse_by_symbol.index:
+            row.update(
+                {
+                    "resolved": False,
+                    "reason": "symbol_not_found_in_kite_nse_dump",
+                    "exchange": None,
+                    "tradingsymbol": None,
+                    "instrument_token": None,
+                    "match_confidence": 0.0,
+                }
+            )
+            rows.append(row)
+            continue
+
+        nse_row = nse_by_symbol.loc[u["security_code"]]
+        if isinstance(nse_row, pd.DataFrame):  # duplicate tradingsymbols, shouldn't happen normally
+            nse_row = nse_row.iloc[0]
+
+        row.update(
+            {
+                "resolved": True,
+                "reason": "exact_nse_symbol_match",
+                "exchange": "NSE",
+                "tradingsymbol": nse_row["tradingsymbol"],
+                "instrument_token": int(nse_row["instrument_token"]),
+                "bse_instrument_token": None,
+                "match_confidence": 1.0,
+            }
+        )
+        rows.append(row)
+
+    return pd.DataFrame(rows)
+
+
+def build_nse_mapping(
+    kite,
+    universe_path: str | Path | None = None,
+    force_refresh_instruments: bool = False,
+) -> pd.DataFrame:
+    """Resolve the Nifty 500 universe to Kite NSE instruments. Nifty 500's
+    `security_code` is already the exact NSE tradingsymbol, so this is a
+    plain exact-match join - no fuzzy matching, no confidence score, no
+    BSE-vs-NSE exchange choice."""
+    universe = load_nifty500_universe(universe_path) if universe_path else load_nifty500_universe()
+    nse_df = _cached_instruments(kite, "NSE", force_refresh_instruments)
+
+    mapping = _resolve_nifty500_universe(universe, nse_df)
+    NSE_MAPPING_FILE.parent.mkdir(parents=True, exist_ok=True)
+    mapping.to_csv(NSE_MAPPING_FILE, index=False)
+    return mapping
+
+
+def load_nse_mapping(refresh_with_kite=None) -> pd.DataFrame:
+    """Load the cached Nifty 500 mapping file, building it first if it
+    doesn't exist and a `kite` client was supplied."""
+    if not NSE_MAPPING_FILE.exists():
+        if refresh_with_kite is None:
+            raise FileNotFoundError(
+                f"{NSE_MAPPING_FILE} does not exist yet. Run "
+                "`build_nse_mapping(kite)` once (see README) to generate it."
+            )
+        return build_nse_mapping(refresh_with_kite)
+    return pd.read_csv(NSE_MAPPING_FILE, dtype={"security_code": str})
+
+
+def combine_mappings(*mappings: pd.DataFrame) -> pd.DataFrame:
+    """Concatenate mappings from multiple universes into one scan set.
+
+    A company listed in both BSE 1000 and Nifty 500 will usually resolve to
+    the same NSE (tradingsymbol, exchange) pair from both sources - scanning
+    it twice would double its weight in sector-strength stats and clutter
+    the results table with a duplicate row. Dedupe on that pair, keeping the
+    first occurrence's identity but merging the `universe` tags (e.g.
+    "BSE1000+NIFTY500") so provenance isn't lost."""
+    non_empty = [m for m in mappings if m is not None and not m.empty]
+    if not non_empty:
+        return pd.DataFrame()
+    combined = pd.concat(non_empty, ignore_index=True)
+
+    is_resolved = combined["resolved"] == True  # noqa: E712
+    # Group key for merging universe tags: resolved rows group by the actual
+    # tradable instrument (so the same NSE symbol reached via both universes
+    # merges into one row); each unresolved row is its own group (nothing to
+    # merge - there's no shared instrument to key off of) so it isn't
+    # accidentally lumped in with unrelated unresolved rows from the other
+    # universe.
+    group_key = combined["tradingsymbol"].fillna("") + "@" + combined["exchange"].fillna("")
+    group_key = group_key.where(is_resolved, "unresolved_" + combined.index.astype(str))
+
+    combined["universe"] = combined.groupby(group_key)["universe"].transform(
+        lambda tags: "+".join(dict.fromkeys(tags))
+    )
+    combined = combined.loc[~group_key.duplicated()].reset_index(drop=True)
+    return combined

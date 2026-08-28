@@ -2,8 +2,16 @@ import math
 
 import pandas as pd
 
-from src.instruments import _best_nse_match, _build_nse_name_index, _is_token_prefix
-from src.universe import normalize_name
+from src.instruments import _best_nse_match, _build_nse_name_index, _is_token_prefix, _resolve_nifty500_universe, combine_mappings
+from src.universe import load_nifty500_universe, normalize_name
+
+
+def test_load_nifty500_universe_parses_official_nse_csv():
+    df = load_nifty500_universe()
+    assert len(df) == 500
+    assert (df["universe"] == "NIFTY500").all()
+    reliance = df[df["company_name_raw"].str.contains("Reliance Industries")]
+    assert reliance.iloc[0]["security_code"] == "RELIANCE"
 
 
 def test_normalize_name_handles_non_string_input():
@@ -70,3 +78,102 @@ def test_best_nse_match_boosts_truncated_bse_name_against_full_nse_name():
     idx, score = _best_nse_match(bse_key, nse_df, name_index)
     assert idx == 0
     assert score >= 0.9
+
+
+def _fake_nse_dump(symbols: list[str]) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "tradingsymbol": symbols,
+            "instrument_token": [1000 + i for i in range(len(symbols))],
+        }
+    )
+
+
+def test_resolve_nifty500_universe_exact_matches_by_symbol():
+    # Nifty 500's Symbol column IS the NSE tradingsymbol already - a plain
+    # exact-match join, unlike BSE 1000's fuzzy name matching.
+    universe = pd.DataFrame(
+        {
+            "company_name_raw": ["Reliance Industries Ltd.", "Totally Unlisted Ltd."],
+            "security_code": ["RELIANCE", "NOTREAL"],
+            "sector": ["Oil Gas & Consumable Fuels", "Unclassified"],
+        }
+    )
+    nse_df = _fake_nse_dump(["RELIANCE", "TCS"])
+    mapping = _resolve_nifty500_universe(universe, nse_df)
+
+    reliance = mapping.set_index("security_code").loc["RELIANCE"]
+    assert reliance["resolved"] == True  # noqa: E712
+    assert reliance["exchange"] == "NSE"
+    assert reliance["tradingsymbol"] == "RELIANCE"
+    assert reliance["match_confidence"] == 1.0
+
+    unlisted = mapping.set_index("security_code").loc["NOTREAL"]
+    assert unlisted["resolved"] == False  # noqa: E712
+    assert unlisted["reason"] == "symbol_not_found_in_kite_nse_dump"
+
+
+def test_combine_mappings_merges_universe_tags_for_the_same_instrument():
+    # A company in both BSE 1000 and Nifty 500 that resolves to the same
+    # NSE instrument from each should appear once, tagged with both.
+    bse_mapping = pd.DataFrame(
+        [
+            {
+                "company_name_raw": "Reliance Industries Ltd", "security_code": "500325",
+                "sector": "Energy", "universe": "BSE1000", "resolved": True,
+                "reason": "matched_nse_by_name", "exchange": "NSE", "tradingsymbol": "RELIANCE",
+                "instrument_token": 1001, "bse_instrument_token": 999, "match_confidence": 0.98,
+            },
+            {
+                "company_name_raw": "Some Bse Only Co", "security_code": "500001",
+                "sector": "Misc", "universe": "BSE1000", "resolved": False,
+                "reason": "security_code_not_found_in_kite_dump", "exchange": None,
+                "tradingsymbol": None, "instrument_token": None, "match_confidence": 0.0,
+            },
+        ]
+    )
+    nifty_mapping = pd.DataFrame(
+        [
+            {
+                "company_name_raw": "Reliance Industries Ltd.", "security_code": "RELIANCE",
+                "sector": "Oil Gas & Consumable Fuels", "universe": "NIFTY500", "resolved": True,
+                "reason": "exact_nse_symbol_match", "exchange": "NSE", "tradingsymbol": "RELIANCE",
+                "instrument_token": 1001, "bse_instrument_token": None, "match_confidence": 1.0,
+            },
+            {
+                "company_name_raw": "Nifty Only Co Ltd.", "security_code": "NIFTYONLY",
+                "sector": "Services", "universe": "NIFTY500", "resolved": False,
+                "reason": "symbol_not_found_in_kite_nse_dump", "exchange": None,
+                "tradingsymbol": None, "instrument_token": None, "match_confidence": 0.0,
+            },
+        ]
+    )
+
+    combined = combine_mappings(bse_mapping, nifty_mapping)
+
+    # Only one row for the shared NSE instrument, tagged with both universes.
+    reliance_rows = combined[combined["instrument_token"] == 1001]
+    assert len(reliance_rows) == 1
+    assert reliance_rows.iloc[0]["universe"] == "BSE1000+NIFTY500"
+
+    # Distinct unresolved rows from each universe are kept separate, not
+    # merged into each other just because they share an empty tradingsymbol.
+    unresolved = combined[combined["resolved"] == False]  # noqa: E712
+    assert len(unresolved) == 2
+    assert set(unresolved["universe"]) == {"BSE1000", "NIFTY500"}
+    assert len(combined) == 3
+
+
+def test_combine_mappings_passes_through_a_single_universe_unchanged():
+    mapping = pd.DataFrame(
+        [
+            {
+                "company_name_raw": "A Ltd", "security_code": "A", "sector": "X",
+                "universe": "NIFTY500", "resolved": True, "reason": "exact_nse_symbol_match",
+                "exchange": "NSE", "tradingsymbol": "A", "instrument_token": 1, "match_confidence": 1.0,
+            },
+        ]
+    )
+    combined = combine_mappings(mapping)
+    assert len(combined) == 1
+    assert combined.iloc[0]["universe"] == "NIFTY500"

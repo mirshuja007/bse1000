@@ -13,7 +13,7 @@ from src.indicators import compute_indicators, latest_snapshot
 def compute_sector_strength(snapshots: dict[str, dict], mapping: pd.DataFrame) -> dict[str, float]:
     """Rank sectors by median 20-day relative return, map to a 0-100 score
     per sector so stocks in currently-leading sectors get a boost."""
-    sector_by_code = mapping.set_index("bse_code")["sector"].to_dict()
+    sector_by_code = mapping.set_index("security_code")["sector"].to_dict()
 
     sector_returns: dict[str, list[float]] = {}
     for code, snap in snapshots.items():
@@ -134,14 +134,15 @@ def run_scan(
     benchmark: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """
-    history: {bse_code: raw OHLCV DataFrame}
-    mapping: universe mapping DataFrame (bse_code, company_name_raw, sector, tradingsymbol, exchange, ...)
+    history: {security_code: raw OHLCV DataFrame}
+    mapping: universe mapping DataFrame (security_code, company_name_raw, sector, universe, tradingsymbol, exchange, ...)
     Returns one row per stock with indicator values, filter pass/fail, and conviction score.
     """
-    name_by_code = mapping.set_index("bse_code")["company_name_raw"].to_dict()
-    sector_by_code = mapping.set_index("bse_code")["sector"].to_dict()
-    tsym_by_code = mapping.set_index("bse_code")["tradingsymbol"].to_dict()
-    exch_by_code = mapping.set_index("bse_code")["exchange"].to_dict()
+    name_by_code = mapping.set_index("security_code")["company_name_raw"].to_dict()
+    sector_by_code = mapping.set_index("security_code")["sector"].to_dict()
+    tsym_by_code = mapping.set_index("security_code")["tradingsymbol"].to_dict()
+    exch_by_code = mapping.set_index("security_code")["exchange"].to_dict()
+    universe_by_code = mapping.set_index("security_code")["universe"].to_dict()
 
     snapshots: dict[str, dict] = {}
     enriched_cache: dict[str, pd.DataFrame] = {}
@@ -150,7 +151,7 @@ def run_scan(
     min_bars_needed = 60  # need at least this many bars for RSI/ADX/MACD to be meaningful
     for code, df in history.items():
         if df is None or len(df) < min_bars_needed:
-            skipped.append({"bse_code": code, "reason": "insufficient_history"})
+            skipped.append({"security_code": code, "reason": "insufficient_history"})
             continue
         enriched = compute_indicators(df, config, benchmark)
         enriched_cache[code] = enriched
@@ -167,9 +168,10 @@ def run_scan(
 
         rows.append(
             {
-                "bse_code": code,
+                "security_code": code,
                 "company_name": name_by_code.get(code, code),
                 "sector": sector,
+                "universe": universe_by_code.get(code, "?"),
                 "tradingsymbol": tsym_by_code.get(code, code),
                 "exchange": exch_by_code.get(code, "BSE"),
                 "as_of": snap.get("as_of"),

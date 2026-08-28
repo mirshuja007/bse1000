@@ -54,13 +54,15 @@ treat them as slightly exposed and recommend, at your convenience:
 
 ```
 config/scanner_config.yaml   All screening/scoring parameters (edit or override live in the UI)
-data/bse_1000_constituents.csv   Your uploaded universe (company name, BSE code, sector)
+data/bse_1000_constituents.csv   BSE 1000 universe (company name, BSE scrip code, sector)
 data/universe_mapping.csv    Generated: BSE code -> Kite instrument (NSE preferred), git-ignored
+data/nifty_500_constituents.csv   Nifty 500 universe, NSE's own official list (company, NSE symbol, sector)
+data/nifty500_mapping.csv    Generated: Nifty 500 symbol -> Kite NSE instrument, git-ignored
 src/
   config.py        YAML + .env loading, no secrets in YAML ever
   auth.py           Automated Kite login (password+TOTP) with a manual-login fallback
-  universe.py       Loads/normalizes the constituent list
-  instruments.py    Resolves each BSE scrip code to a tradable Kite instrument
+  universe.py       Loads/normalizes both constituent lists
+  instruments.py    Resolves each constituent to a tradable Kite instrument (BSE fuzzy match + Nifty 500 exact match)
   data_fetcher.py    Rate-limited historical OHLCV pulls, with local caching
   indicators.py      RSI, ATR, ADX, MACD, DMA breakouts, Donchian, OBV, relative strength...
   scanner.py         Applies configurable filters + sector-strength ranking
@@ -70,23 +72,36 @@ run_scan.py           Headless CLI runner, e.g. for a cron job
 tests/                Offline unit tests (no network required)
 ```
 
-### Why BSE codes get mapped to NSE symbols
+### Two universes: BSE 1000 and Nifty 500
 
-Your source file lists BSE scrip codes (e.g. `500325`). Most BSE 1000 names
-are dual-listed and far more liquid on NSE, so `instruments.py`:
-1. Matches your BSE code exactly against Kite's BSE instrument dump
-   (for BSE equities, `tradingsymbol` *is* the scrip code — an exact match,
-   not a guess).
-2. Uses Kite's own company `name` field (not your CSV's `Constituents`
-   column, which BSE truncates to ~30 characters) to find the equivalent
-   NSE listing, via exact then fuzzy name matching.
-3. Falls back to the BSE listing itself if no confident NSE match is found,
-   and records a `match_confidence` for every row.
+Pick which to scan from the "Universe" section at the top of the sidebar
+(BSE 1000 / Nifty 500 / Both, deduped). They resolve very differently:
 
-**After your first run, open `data/universe_mapping.csv` and skim rows with
-`match_confidence < 0.9`** — that's the honest, known limitation of
-automated name matching across ~1000 tickers. You can hand-edit that file;
-the scanner just reads it going forward.
+- **BSE 1000** — your source file lists BSE scrip codes (e.g. `500325`).
+  Most names are dual-listed and far more liquid on NSE, so
+  `instruments.py`: (1) matches your BSE code exactly against Kite's BSE
+  instrument dump (for BSE equities, `tradingsymbol` *is* the scrip code -
+  an exact match, not a guess); (2) uses Kite's own company `name` field
+  (not your CSV's `Constituents` column, which BSE truncates to ~30
+  characters) to find the equivalent NSE listing, via exact then fuzzy name
+  matching; (3) falls back to the BSE listing itself if no confident NSE
+  match is found, and records a `match_confidence` for every row.
+
+  **After your first run, open `data/universe_mapping.csv` and skim rows
+  with `match_confidence < 0.9`** — that's the honest, known limitation of
+  automated name matching across ~1000 tickers. You can hand-edit that
+  file; the scanner just reads it going forward.
+
+- **Nifty 500** — NSE's own official constituent list (`ind_nifty500list.csv`)
+  already gives the exact NSE tradingsymbol per company, so
+  `build_nse_mapping()` is a plain exact-match join against Kite's NSE
+  instrument dump. No fuzzy matching, no confidence score, no manual review
+  needed - every resolvable row is a certain match.
+
+Selecting "Both" scans the union, deduped: a company present in both lists
+that resolves to the same NSE instrument is only scored once, tagged
+`BSE1000+NIFTY500` in the results table's `universe` column, so provenance
+isn't lost.
 
 ## Setup
 

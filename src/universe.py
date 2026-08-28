@@ -1,11 +1,24 @@
-"""Load the BSE 1000 constituent universe from the CSV export.
+"""Load the stock universe(s) this app can scan, from their CSV exports.
 
-Note: the `Constituents` (company name) column in the source file is
-truncated to ~30 characters by BSE's own export (e.g. "Aditya Birla Fashion and
-Retai..."). It is kept only as a human-readable label and a sanity-check
-signal - it is NOT used as the primary key for instrument resolution.
-The `Symbol` column (the numeric BSE scrip code) is the reliable key and is
-matched exactly against Kite's BSE instrument dump.
+Two universes are supported, resolved very differently downstream (see
+src/instruments.py):
+
+- BSE 1000 (`load_universe`): the `Constituents` (company name) column is
+  truncated to ~30 characters by BSE's own export (e.g. "Aditya Birla
+  Fashion and Retai..."). It is kept only as a human-readable label and a
+  sanity-check signal - it is NOT used as the primary key for instrument
+  resolution. The `Symbol` column (the numeric BSE scrip code) is the
+  reliable key and is matched exactly against Kite's BSE instrument dump,
+  then fuzzy-matched to an NSE tradingsymbol for liquidity.
+- Nifty 500 (`load_nifty500_universe`): NSE's own official constituent
+  list. Its `Symbol` column IS already the exact NSE tradingsymbol (e.g.
+  "RELIANCE"), so resolution is a plain exact-match join against Kite's
+  NSE instrument dump - no fuzzy name matching needed at all.
+
+Both loaders normalize to the same `security_code` / `company_name_raw` /
+`sector` / `universe` column shape so the rest of the app (scanner,
+instrument resolution, app.py) doesn't need to care which universe a row
+came from.
 """
 from __future__ import annotations
 
@@ -17,6 +30,7 @@ import pandas as pd
 from src.config import REPO_ROOT
 
 DEFAULT_UNIVERSE_FILE = REPO_ROOT / "data" / "bse_1000_constituents.csv"
+DEFAULT_NIFTY500_UNIVERSE_FILE = REPO_ROOT / "data" / "nifty_500_constituents.csv"
 
 _SUFFIX_WORDS = {
     "LIMITED",
@@ -78,13 +92,36 @@ def load_universe(path: str | Path = DEFAULT_UNIVERSE_FILE) -> pd.DataFrame:
     df = df.rename(
         columns={
             "Constituents": "company_name_raw",
-            "Symbol": "bse_code",
+            "Symbol": "security_code",
             "Macro-Economic Sector": "sector",
         }
     )
-    df["bse_code"] = df["bse_code"].str.strip()
+    df["security_code"] = df["security_code"].str.strip()
     df["company_name_raw"] = df["company_name_raw"].str.strip()
     df["sector"] = df["sector"].fillna("Unclassified").str.strip()
     df["name_key"] = df["company_name_raw"].apply(normalize_name)
-    df = df.drop_duplicates(subset="bse_code").reset_index(drop=True)
+    df["universe"] = "BSE1000"
+    df = df.drop_duplicates(subset="security_code").reset_index(drop=True)
+    return df
+
+
+def load_nifty500_universe(path: str | Path = DEFAULT_NIFTY500_UNIVERSE_FILE) -> pd.DataFrame:
+    """Load NSE's official Nifty 500 constituent list. Unlike BSE 1000's
+    `Symbol` (a numeric scrip code), this file's `Symbol` column is already
+    the exact NSE tradingsymbol - so `security_code` here doubles as the
+    tradingsymbol used for the exact-match join in build_nse_mapping()."""
+    df = pd.read_csv(path, dtype={"Symbol": str})
+    df = df.rename(
+        columns={
+            "Company Name": "company_name_raw",
+            "Symbol": "security_code",
+            "Industry": "sector",
+        }
+    )
+    df["security_code"] = df["security_code"].str.strip()
+    df["company_name_raw"] = df["company_name_raw"].str.strip()
+    df["sector"] = df["sector"].fillna("Unclassified").str.strip()
+    df["name_key"] = df["company_name_raw"].apply(normalize_name)
+    df["universe"] = "NIFTY500"
+    df = df.dropna(subset=["security_code"]).drop_duplicates(subset="security_code").reset_index(drop=True)
     return df

@@ -26,7 +26,7 @@ from src.auth import (
 )
 from src.config import KiteCredentials, app_password, deep_merge, load_config
 from src.data_fetcher import fetch_benchmark_history, fetch_universe_history, resolve_benchmark_token
-from src.instruments import build_universe_mapping, load_mapping
+from src.instruments import build_nse_mapping, build_universe_mapping, combine_mappings, load_mapping, load_nse_mapping
 from src.scanner import run_scan
 
 st.set_page_config(page_title="BSE 1000 Momentum Scanner", layout="wide")
@@ -166,6 +166,34 @@ def render_login_panel() -> None:
 
 
 render_login_panel()
+
+
+# ---------------------------------------------------------------------------
+# Which constituent list(s) to scan. Kept separate from the trading-style
+# preset below since it's a "what universe" choice, not a "how to score it"
+# choice. BSE 1000 and Nifty 500 overlap heavily but aren't identical -
+# picking "Both" scans the union, deduped so a dual-listed company that
+# resolves to the same NSE instrument from both lists is only scored once
+# (see combine_mappings in src/instruments.py).
+# ---------------------------------------------------------------------------
+UNIVERSE_OPTIONS = {
+    "BSE 1000": "bse1000",
+    "Nifty 500": "nifty500",
+    "Both (deduped)": "both",
+}
+
+
+def render_universe_selector() -> str:
+    st.sidebar.header("Universe")
+    choice = st.sidebar.radio("Scan which constituents?", list(UNIVERSE_OPTIONS.keys()), key="universe_choice")
+    st.sidebar.caption(
+        "Nifty 500 resolves faster and more reliably (exact NSE symbol match) than BSE 1000 "
+        "(fuzzy name match, since BSE codes aren't NSE symbols)."
+    )
+    return UNIVERSE_OPTIONS[choice]
+
+
+selected_universe = render_universe_selector()
 
 
 # ---------------------------------------------------------------------------
@@ -412,6 +440,25 @@ st.caption(
     "Not financial advice - use alongside your own risk management."
 )
 
+def load_selected_mapping(kite, universe_choice: str, force_refresh: bool = False) -> pd.DataFrame:
+    """Build/load the mapping(s) for whichever universe(s) the sidebar has
+    selected, combining them (deduped) when both are chosen."""
+    mappings = []
+    if universe_choice in ("bse1000", "both"):
+        mappings.append(
+            build_universe_mapping(kite, force_refresh_instruments=force_refresh)
+            if force_refresh
+            else load_mapping(refresh_with_kite=kite)
+        )
+    if universe_choice in ("nifty500", "both"):
+        mappings.append(
+            build_nse_mapping(kite, force_refresh_instruments=force_refresh)
+            if force_refresh
+            else load_nse_mapping(refresh_with_kite=kite)
+        )
+    return combine_mappings(*mappings)
+
+
 col1, col2, col3 = st.columns([1, 1, 2])
 run_clicked = col1.button("Run scan", type="primary")
 refresh_mapping_clicked = col2.button("Refresh instrument mapping")
@@ -422,8 +469,8 @@ if (run_clicked or refresh_mapping_clicked) and "kite" not in st.session_state:
 
 if refresh_mapping_clicked:
     kite = st.session_state.kite
-    with st.spinner("Rebuilding BSE->Kite instrument mapping..."):
-        mapping = build_universe_mapping(kite, force_refresh_instruments=True)
+    with st.spinner("Rebuilding universe->Kite instrument mapping..."):
+        mapping = load_selected_mapping(kite, selected_universe, force_refresh=True)
         st.session_state.mapping = mapping
     st.success(f"Mapping rebuilt: {mapping['resolved'].sum()}/{len(mapping)} constituents resolved.")
 
@@ -431,7 +478,7 @@ if run_clicked:
     kite = st.session_state.kite
 
     with st.spinner("Loading universe mapping..."):
-        mapping = load_mapping(refresh_with_kite=kite)
+        mapping = load_selected_mapping(kite, selected_universe)
         resolved = mapping[mapping["resolved"] == True]  # noqa: E712
         st.session_state.mapping = mapping
 
@@ -455,7 +502,7 @@ if run_clicked:
         )
     progress_bar.empty()
 
-    history = {r.bse_code: r.bars for r in results if r.ok}
+    history = {r.security_code: r.bars for r in results if r.ok}
     n_failed = sum(1 for r in results if not r.ok)
 
     with st.spinner("Scoring conviction..."):
@@ -519,6 +566,7 @@ if "result_df" in st.session_state:
             "company_name",
             "tradingsymbol",
             "exchange",
+            "universe",
             "sector",
             "conviction_score",
             "conviction_tier",
@@ -550,10 +598,10 @@ if "result_df" in st.session_state:
         if len(view):
             selected = st.selectbox(
                 "Pick a stock",
-                options=view["bse_code"].tolist(),
-                format_func=lambda code: f"{view.set_index('bse_code').loc[code, 'company_name']} ({view.set_index('bse_code').loc[code, 'tradingsymbol']})",
+                options=view["security_code"].tolist(),
+                format_func=lambda code: f"{view.set_index('security_code').loc[code, 'company_name']} ({view.set_index('security_code').loc[code, 'tradingsymbol']})",
             )
-            row = result_df.set_index("bse_code").loc[selected]
+            row = result_df.set_index("security_code").loc[selected]
             enriched = st.session_state.enriched_cache.get(selected)
 
             if row.get("explanation"):

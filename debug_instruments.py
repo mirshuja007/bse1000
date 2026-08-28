@@ -37,7 +37,7 @@ for row in bse_eq[:8]:
 
 print()
 universe = load_universe()
-sample_codes = universe["bse_code"].head(10).tolist()
+sample_codes = universe["security_code"].head(10).tolist()
 print(f"First 10 BSE codes from your CSV: {sample_codes}\n")
 
 by_symbol = {row["tradingsymbol"]: row for row in bse_eq}
