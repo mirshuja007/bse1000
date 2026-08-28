@@ -227,10 +227,38 @@ POSITIONAL_PRESET = {
     },
 }
 
+# Mirrors a specific 3-rule Chartink screener a user shared:
+#   Daily Close > 1-day-ago Max(Daily High, 125)   -> 125-day high breakout
+#   Daily RSI(14) < 70                             -> not yet deeply overbought
+#   Daily Volume > 1-day-ago SMA(Daily Volume, 125) -> above-average participation
+# Everything else our scanner normally requires (50/200DMA structure, ADX
+# trend strength, Supertrend flip) is switched OFF here so this preset
+# behaves like that screener rather than "that screener plus all our other
+# filters stacked on top." The one addition is a minimum-liquidity floor
+# (price/turnover) that the original screener didn't have - kept on so
+# results aren't dominated by illiquid names, called out here rather than
+# left silent. Note our RSI/volume comparisons use <= / >= at the boundary
+# where Chartink's are strictly < / > - only matters if a value lands
+# exactly on 70 or exactly on the average, which is rare.
+CHARTINK_BREAKOUT_PRESET = {
+    "filters": {
+        "liquidity": {"enabled": True, "min_price": 20, "min_avg_turnover_cr": 3},
+        "volume": {"enabled": True, "surge_multiplier": 1.0, "lookback": 125},
+        "dma50_breakout": {"enabled": False},
+        "dma200_breakout": {"enabled": False},
+        "trend_filter": {"enabled": False},
+        "rsi": {"enabled": True, "min_rsi": 0, "max_rsi": 70, "flag_above": 70},
+        "donchian_breakout": {"enabled": True, "period": 125},
+        "adx": {"enabled": False},
+        "supertrend": {"enabled": False},
+    },
+}
+
 PRESET_LABELS = {
     "Custom (manual)": None,
     "Swing (3-7 days)": SWING_PRESET,
     "Positional (8-15 days)": POSITIONAL_PRESET,
+    "125-Day Breakout (Chartink-style)": CHARTINK_BREAKOUT_PRESET,
 }
 
 # Presets for what to overlay on the Stock Detail price chart - independent
