@@ -161,13 +161,37 @@ thresholds adjustable.
 Final tiers: **Very High Conviction (≥75)**, **High Conviction (≥60)**,
 **Moderate Conviction (≥45)**, **Watchlist (<45)**.
 
+## Tracking past recommendations
+
+**Done** (was on the roadmap as forward-return tracking): click **📌 Track
+this pick** in the Stock Detail panel to log a candidate's entry price,
+stop, target, and entry-time signals to `data/tracked_picks.csv`
+(git-ignored - it's your personal record, not sample data). The **Tracked
+picks** section at the bottom of the app shows every logged pick and a
+**🔄 Update tracked positions** button that:
+
+- fetches real daily bars since each open pick was logged and checks each
+  day's high/low against target and stop (not just today's close, so an
+  intraday spike through a level isn't missed);
+- marks a pick `HIT_TARGET`, `HIT_STOPLOSS`, or `EXPIRED` (ran out the
+  15-day horizon untouched) accordingly, with the actual exit price/date
+  and realized return;
+- for picks still `OPEN`, flags real deterioration in the setup itself -
+  Supertrend flipping bearish, RSI fading hard, price closing back below
+  its 50DMA - so you can see a weakening thesis even before price hits
+  either level;
+- surfaces a win rate (hit-target vs hit-stop) across everything closed so
+  far, which is the actual, non-hallucinated answer to "is this scoring any
+  good" - see `src/tracker.py`.
+
 ## Roadmap / suggested next steps
 
 Ranked by what would sharpen short-term (1-15 day) alpha the most:
 
 1. **Backtest the scoring model** against BSE 1000 history to validate/tune
    the category weights and penalty thresholds — right now they're
-   well-reasoned defaults, not empirically fitted.
+   well-reasoned defaults, not empirically fitted. The tracked-picks log
+   above is a live, forward-looking start on this same question.
 2. **Delivery % / DII-FII data overlay** (NSE bhavcopy delivery data) —
    a volume surge with high delivery % is a much stronger signal than one
    driven by intraday churn.
@@ -178,9 +202,7 @@ Ranked by what would sharpen short-term (1-15 day) alpha the most:
    already feeds the score.
 5. **Alerting** — push a Slack/Telegram/email digest of new Very-High-
    Conviction names each morning (the CLI runner is cron-ready).
-6. **Position sizing / risk overlay** — ATR-based stop-loss and position
-   size suggestions alongside each candidate.
-7. **Intraday confirmation** — an optional intraday volume-pace check
+6. **Intraday confirmation** — an optional intraday volume-pace check
    (comparing partial-day volume to the same time on average days) so you
    don't have to wait for end-of-day data to catch a breakout starting.
 

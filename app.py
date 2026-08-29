@@ -24,10 +24,11 @@ from src.auth import (
     login_automated,
     new_kite_client,
 )
-from src.config import KiteCredentials, app_password, deep_merge, load_config
-from src.data_fetcher import fetch_benchmark_history, fetch_universe_history, resolve_benchmark_token
+from src.config import REPO_ROOT, KiteCredentials, app_password, deep_merge, load_config
+from src.data_fetcher import RateLimiter, fetch_benchmark_history, fetch_one, fetch_universe_history, resolve_benchmark_token
 from src.instruments import build_nse_mapping, build_universe_mapping, combine_mappings, load_mapping, load_nse_mapping
 from src.scanner import run_scan
+from src.tracker import CLOSED_STATUSES, load_tracked_picks, log_pick, update_tracked_picks
 
 st.set_page_config(page_title="BSE 1000 Momentum Scanner", layout="wide")
 
@@ -639,6 +640,10 @@ if "result_df" in st.session_state:
                 if row["notes"]:
                     st.info(row["notes"])
 
+                if st.button("📌 Track this pick", key=f"track_{selected}"):
+                    logged, msg = log_pick(row.to_dict())
+                    (st.success if logged else st.warning)(msg)
+
             with chart_col:
                 if enriched is not None and not enriched.empty:
                     tail = enriched.tail(150)
@@ -708,4 +713,79 @@ else:
         "(data/universe_mapping.csv for BSE 1000, data/nifty500_mapping.csv for Nifty 500). "
         "Nifty 500 resolves by exact NSE symbol match; only the BSE 1000 mapping needs a "
         "match_confidence review, since it relies on fuzzy name matching."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Tracked picks - the forward record of what actually happened to a past
+# recommendation, independent of the current scan. Click "Track this pick"
+# in the Stock Detail panel above to add one; this section shows every pick
+# logged so far, and can re-check the open ones against real market data.
+# ---------------------------------------------------------------------------
+st.divider()
+st.header("Tracked picks")
+st.caption(
+    "The honest record of past recommendations - did each one reach its target, hit its stop, "
+    "run out its 15-day horizon untouched, or is the underlying setup quietly weakening? "
+    "This is the only way to know if the conviction score is any good."
+)
+
+tracked = load_tracked_picks()
+
+if tracked.empty:
+    st.info("No picks tracked yet. Open a stock in the Stock Detail panel above and click **Track this pick**.")
+else:
+    if st.button("🔄 Update tracked positions"):
+        if "kite" not in st.session_state:
+            st.warning("Log in to Kite first using the panel in the sidebar.")
+        else:
+            def _fetch_bars(kite, instrument_token, history_days):
+                return fetch_one(
+                    kite,
+                    instrument_token,
+                    history_days,
+                    interval="day",
+                    rate_limiter=RateLimiter(cfg["data"]["max_requests_per_second"]),
+                    cache_dir=REPO_ROOT / ".cache" / "ohlcv",
+                    cache_ttl_hours=cfg["data"]["cache_ttl_hours"],
+                )
+
+            with st.spinner("Re-checking open picks against latest market data..."):
+                tracked = update_tracked_picks(st.session_state.kite, cfg, _fetch_bars)
+            st.success("Tracked picks updated.")
+
+    open_picks = tracked[~tracked["status"].isin(CLOSED_STATUSES)]
+    closed_picks = tracked[tracked["status"].isin(CLOSED_STATUSES)]
+    wins = closed_picks[closed_picks["status"] == "HIT_TARGET"]
+    losses = closed_picks[closed_picks["status"] == "HIT_STOPLOSS"]
+    decided = len(wins) + len(losses)  # excludes EXPIRED/CLOSED_MANUAL from the win-rate denominator
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Open", len(open_picks))
+    m2.metric("Hit target", len(wins))
+    m3.metric("Hit stop", len(losses))
+    win_rate = f"{len(wins) / decided * 100:.0f}%" if decided else "n/a"
+    m4.metric("Win rate (target vs stop)", win_rate)
+
+    st.dataframe(
+        tracked[
+            [
+                "company_name",
+                "tradingsymbol",
+                "status",
+                "date_logged",
+                "entry_price",
+                "stop_loss",
+                "target",
+                "last_checked_date",
+                "last_checked_price",
+                "unrealized_pct",
+                "exit_price",
+                "realized_pct",
+                "days_held",
+                "signal_notes",
+            ]
+        ].sort_values("date_logged", ascending=False),
+        use_container_width=True,
+        height=350,
     )

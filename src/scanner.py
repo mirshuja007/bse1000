@@ -143,6 +143,7 @@ def run_scan(
     tsym_by_code = mapping.set_index("security_code")["tradingsymbol"].to_dict()
     exch_by_code = mapping.set_index("security_code")["exchange"].to_dict()
     universe_by_code = mapping.set_index("security_code")["universe"].to_dict()
+    token_by_code = mapping.set_index("security_code")["instrument_token"].to_dict()
 
     snapshots: dict[str, dict] = {}
     enriched_cache: dict[str, pd.DataFrame] = {}
@@ -174,6 +175,7 @@ def run_scan(
                 "universe": universe_by_code.get(code, "?"),
                 "tradingsymbol": tsym_by_code.get(code, code),
                 "exchange": exch_by_code.get(code, "BSE"),
+                "instrument_token": token_by_code.get(code),
                 "as_of": snap.get("as_of"),
                 "close": snap.get("close"),
                 "rsi": snap.get("rsi"),
