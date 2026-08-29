@@ -27,6 +27,7 @@ from src.auth import (
 from src.config import REPO_ROOT, KiteCredentials, app_password, deep_merge, load_config
 from src.data_fetcher import RateLimiter, fetch_benchmark_history, fetch_one, fetch_universe_history, resolve_benchmark_token
 from src.instruments import build_nse_mapping, build_universe_mapping, combine_mappings, load_mapping, load_nse_mapping
+from src.recommendation_log import annotate_with_history, load_recommendation_history, update_recommendation_history
 from src.scanner import run_scan
 from src.tracker import CLOSED_STATUSES, load_tracked_picks, log_pick, update_tracked_picks
 
@@ -509,6 +510,11 @@ if run_clicked:
     with st.spinner("Scoring conviction..."):
         result_df, enriched_cache, skipped = run_scan(history, resolved, cfg, benchmark)
 
+    if not result_df.empty:
+        prior_history = load_recommendation_history()
+        result_df = annotate_with_history(result_df, history=prior_history)
+        update_recommendation_history(result_df, history=prior_history)
+
     st.session_state.result_df = result_df
     st.session_state.enriched_cache = enriched_cache
     st.session_state.scan_time = datetime.now()
@@ -571,6 +577,9 @@ if "result_df" in st.session_state:
             "sector",
             "conviction_score",
             "conviction_tier",
+            "recommendation_status",
+            "first_recommended_date",
+            "entry_price",
             "close",
             "stop_loss",
             "target",

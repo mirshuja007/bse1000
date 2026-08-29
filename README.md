@@ -161,6 +161,29 @@ thresholds adjustable.
 Final tiers: **Very High Conviction (≥75)**, **High Conviction (≥60)**,
 **Moderate Conviction (≥45)**, **Watchlist (<45)**.
 
+## Telling new recommendations from repeats
+
+The results table now shows **recommendation_status**, **first_recommended_date**,
+and **entry_price** for every row, computed automatically - no manual step.
+Every stock that passes all filters on any scan is silently logged to
+`data/recommendation_history.csv` (git-ignored). Next time it resurfaces:
+
+- **New** - first time this stock has ever passed all filters.
+- **Repeat - still long** - seen before, and every signal that qualified it
+  then still holds now (still passes filters, Supertrend still bullish,
+  price still above its 50DMA). `entry_price` stays the *original*
+  first-seen price, not today's close, so you can see how far it's run.
+- **Repeat - exit / trail SL** - seen before, but at least one of those
+  signals has flipped since (Supertrend turned bearish, price closed back
+  below the 50DMA, or it no longer passes the filters that qualified it) -
+  the setup that got it recommended has changed, even though this is
+  presented in the same conviction-score list.
+
+This is separate from Tracked Picks below: this history is automatic and
+covers every candidate the scanner ever surfaces; Tracked Picks is the
+opt-in record of positions you've deliberately chosen to follow for P&L.
+See `src/recommendation_log.py`.
+
 ## Tracking past recommendations
 
 **Done** (was on the roadmap as forward-return tracking): click **📌 Track

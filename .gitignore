@@ -14,6 +14,7 @@ data/universe_mapping.csv
 data/nifty500_mapping.csv
 data/kite_instruments_*.csv
 data/tracked_picks.csv
+data/recommendation_history.csv
 
 # python
 __pycache__/
