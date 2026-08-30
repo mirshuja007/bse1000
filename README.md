@@ -1,7 +1,7 @@
-# BSE 1000 Momentum Scanner
+# India Momentum Scanner
 
-A configurable momentum/breakout scanner for the BSE 1000 universe, built on
-Kite Connect. It screens for volume surges, 50/200-DMA breakouts, RSI
+A configurable momentum/breakout scanner for the BSE 1000 and Nifty 500
+universes, built on Kite Connect. It screens for volume surges, 50/200-DMA breakouts, RSI
 strength and other trend/volatility characteristics, then ranks survivors
 with a transparent, rule-based **conviction score** aimed at a **1-15
 trading-day** swing/momentum horizon.

@@ -1,4 +1,4 @@
-"""BSE 1000 Momentum Scanner - Streamlit dashboard.
+"""India Momentum Scanner - Streamlit dashboard.
 
 Run with:  streamlit run app.py
 
@@ -31,7 +31,7 @@ from src.recommendation_log import annotate_with_history, load_recommendation_hi
 from src.scanner import run_scan
 from src.tracker import CLOSED_STATUSES, load_tracked_picks, log_pick, update_tracked_picks
 
-st.set_page_config(page_title="BSE 1000 Momentum Scanner", layout="wide")
+st.set_page_config(page_title="India Momentum Scanner", layout="wide")
 
 
 # ---------------------------------------------------------------------------
@@ -436,7 +436,7 @@ st.session_state.config = cfg
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
-st.title("BSE 1000 Momentum Scanner")
+st.title("India Momentum Scanner")
 st.caption(
     "Rule-based, fully transparent multi-factor screener for the 1-15 trading day momentum horizon. "
     "Not financial advice - use alongside your own risk management."
