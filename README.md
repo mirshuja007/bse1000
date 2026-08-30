@@ -184,6 +184,36 @@ covers every candidate the scanner ever surfaces; Tracked Picks is the
 opt-in record of positions you've deliberately chosen to follow for P&L.
 See `src/recommendation_log.py`.
 
+## Fundamental quality screen (beta, unverified)
+
+An optional second-pass filter, off by default: market cap ceiling, EBITDA
+margin range, ROE floor, and debt/equity ceiling, sourced from yfinance.
+Enable it under **Fundamentals filter (beta)** in the sidebar.
+
+**Read this before trusting it with real capital.** It was built with no
+network route to Yahoo Finance available - the field names come from
+reading yfinance's own source code (which Yahoo modules it requests), not
+from a live response, so two things are unverified:
+1. **Coverage** - whether Yahoo actually has EBITDA margin / ROE / debt data
+   for the sub-Rs.5000cr names this filter targets, or comes back empty.
+2. **The debt/equity unit** - Yahoo's raw `debtToEquity` field is assumed
+   to be percentage-scaled (divided by 100 to get a ratio); if that's wrong
+   for real NSE data, `src/fundamentals.py`'s `extract_metrics()` needs
+   fixing.
+
+Run `python debug_fundamentals.py <SYMBOL> <SYMBOL> ...` (needs real
+internet access) and check the output against companies whose numbers you
+already know, before relying on this filter. Because of this, a stock with
+missing data is never silently excluded by default - it's flagged
+`fundamentals_note: "Unverified (missing: ...)"` instead of failed; turn on
+**Require all 4 metrics available** in the sidebar for a stricter, fail-
+closed mode once you trust the data. It only fetches for stocks that
+already passed every technical filter (to limit slow web requests), and
+does not feed into the conviction score - it's a separate quality gate, not
+part of momentum scoring.
+
+Note also: ROCE isn't available from yfinance, so ROE stands in for it.
+
 ## Tracking past recommendations
 
 **Done** (was on the roadmap as forward-return tracking): click **📌 Track

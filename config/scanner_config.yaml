@@ -73,6 +73,22 @@ filters:
     multiplier: 3.0                # ATR multiplier - lower = more reactive/more signals
     flip_lookback_days: 3          # only count a red->green flip within this many days as a fresh trigger
 
+  # Fundamental quality screen (market cap, EBITDA margin, ROE, debt/equity),
+  # sourced from yfinance - see src/fundamentals.py for the unverified-field
+  # caveats. Off by default: unlike every other filter above, this one has
+  # not been checked against live data (no network route to Yahoo from the
+  # environment that built it) and can be slow (one web request per stock).
+  # Applied as a second pass, only to candidates that already passed every
+  # technical filter above - never part of the conviction score.
+  fundamentals:
+    enabled: false
+    max_market_cap_cr: 5000         # market cap ceiling, INR crore
+    ebitda_margin_min: 15           # EBITDA margin %, lower bound
+    ebitda_margin_max: 25           # EBITDA margin %, upper bound
+    min_roe_pct: 15                 # ROE % floor (ROCE not available from yfinance - see module docstring)
+    max_debt_to_equity: 2.0         # debt/equity ratio ceiling
+    require_complete_data: false    # if true, a stock with ANY missing metric fails instead of being flagged unverified
+
 # ---------------------------------------------------------------------------
 # Conviction scoring - weighted, transparent, fully rule-based (no black-box
 # ML claims). Category weights must sum to 100. Each category score is 0-100

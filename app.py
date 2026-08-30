@@ -26,6 +26,7 @@ from src.auth import (
 )
 from src.config import REPO_ROOT, KiteCredentials, app_password, deep_merge, load_config
 from src.data_fetcher import RateLimiter, fetch_benchmark_history, fetch_one, fetch_universe_history, resolve_benchmark_token
+from src.fundamentals import annotate_with_fundamentals
 from src.instruments import build_nse_mapping, build_universe_mapping, combine_mappings, load_mapping, load_nse_mapping
 from src.recommendation_log import annotate_with_history, load_recommendation_history, update_recommendation_history
 from src.scanner import run_scan
@@ -409,6 +410,39 @@ def sidebar_controls(cfg: dict) -> dict:
         "Higher = smoother, fewer but more established signals (better for positional holds)."
     )
 
+    st.sidebar.subheader("Fundamentals filter (beta)")
+    cfg["filters"]["fundamentals"]["enabled"] = st.sidebar.checkbox(
+        "Apply fundamental quality screen", cfg["filters"]["fundamentals"]["enabled"]
+    )
+    st.sidebar.caption(
+        "Sourced from yfinance, applied only to stocks that already pass every filter above "
+        "(one slow web request per candidate). Coverage for small/mid-caps is unverified - "
+        "run `python debug_fundamentals.py <SYMBOL>` locally before trusting this. "
+        "ROCE isn't available from yfinance, so ROE is used in its place."
+    )
+    if cfg["filters"]["fundamentals"]["enabled"]:
+        cfg["filters"]["fundamentals"]["max_market_cap_cr"] = st.sidebar.number_input(
+            "Max market cap (Rs. crore)", 0, 1_000_000, int(cfg["filters"]["fundamentals"]["max_market_cap_cr"])
+        )
+        margin_min, margin_max = st.sidebar.slider(
+            "EBITDA margin range (%)",
+            0,
+            80,
+            (int(cfg["filters"]["fundamentals"]["ebitda_margin_min"]), int(cfg["filters"]["fundamentals"]["ebitda_margin_max"])),
+        )
+        cfg["filters"]["fundamentals"]["ebitda_margin_min"] = margin_min
+        cfg["filters"]["fundamentals"]["ebitda_margin_max"] = margin_max
+        cfg["filters"]["fundamentals"]["min_roe_pct"] = st.sidebar.slider(
+            "Min ROE (%)", 0, 50, int(cfg["filters"]["fundamentals"]["min_roe_pct"])
+        )
+        cfg["filters"]["fundamentals"]["max_debt_to_equity"] = st.sidebar.slider(
+            "Max debt/equity", 0.0, 5.0, float(cfg["filters"]["fundamentals"]["max_debt_to_equity"]), 0.1
+        )
+        cfg["filters"]["fundamentals"]["require_complete_data"] = st.sidebar.checkbox(
+            "Require all 4 metrics available (reject unverified data instead of flagging it)",
+            cfg["filters"]["fundamentals"]["require_complete_data"],
+        )
+
     st.sidebar.header("Conviction score weights")
     st.sidebar.caption("Relative weights - don't need to sum to 100, they're normalized automatically.")
     weights = cfg["conviction"]["weights"]
@@ -515,6 +549,17 @@ if run_clicked:
         result_df = annotate_with_history(result_df, history=prior_history)
         update_recommendation_history(result_df, history=prior_history)
 
+        if cfg["filters"]["fundamentals"]["enabled"]:
+            n_candidates = int((result_df["passes_all_filters"] == True).sum())  # noqa: E712
+            fnd_progress = st.progress(0.0, text="Checking fundamentals...")
+
+            def fnd_progress_cb(done, total):
+                fnd_progress.progress(done / total, text=f"Checking fundamentals... {done}/{total}")
+
+            with st.spinner(f"Fetching fundamentals for {n_candidates} candidates from yfinance..."):
+                result_df = annotate_with_fundamentals(result_df, cfg, progress_callback=fnd_progress_cb)
+            fnd_progress.empty()
+
     st.session_state.result_df = result_df
     st.session_state.enriched_cache = enriched_cache
     st.session_state.scan_time = datetime.now()
@@ -563,11 +608,17 @@ if "result_df" in st.session_state:
 
         show_candidates_only = st.checkbox("Show only stocks passing all filters", value=True)
         min_score = st.slider("Minimum conviction score", 0, 100, 0)
+        fundamentals_checked = "passes_fundamentals" in result_df.columns
+        show_fundamentally_strong_only = (
+            st.checkbox("Show only fundamentally strong (beta)", value=False) if fundamentals_checked else False
+        )
 
         view = result_df.copy()
         if show_candidates_only:
             view = view[view["passes_all_filters"]]
         view = view[view["conviction_score"] >= min_score]
+        if show_fundamentally_strong_only:
+            view = view[view["passes_fundamentals"] == True]  # noqa: E712
 
         display_cols = [
             "company_name",
@@ -595,6 +646,11 @@ if "result_df" in st.session_state:
             "supertrend_flip_recent",
             "notes",
         ]
+        if fundamentals_checked:
+            display_cols += [
+                "market_cap_cr", "ebitda_margin_pct", "roe_pct", "debt_to_equity",
+                "passes_fundamentals", "fundamentals_note",
+            ]
         st.dataframe(view[display_cols], use_container_width=True, height=450)
 
         st.download_button(
