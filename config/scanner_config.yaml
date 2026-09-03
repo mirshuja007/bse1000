@@ -89,6 +89,25 @@ filters:
     max_debt_to_equity: 2.0         # debt/equity ratio ceiling
     require_complete_data: false    # if true, a stock with ANY missing metric fails instead of being flagged unverified
 
+  # Growth & Quality screen (the "20/40 rule": sales growth, PAT growth,
+  # low price volatility, PEG) plus an optional futuristic-sector theme
+  # filter - a SEPARATE, evolving panel from `fundamentals` above (kept
+  # apart per request, to refine independently). See src/growth_screen.py
+  # for the unverified-yfinance-field caveats (same as `fundamentals`,
+  # except annualized_volatility which is computed from this app's own
+  # already-fetched price data, not yfinance). Off by default; applied as
+  # a second pass to candidates that already passed every technical
+  # filter; never part of the conviction score.
+  growth_quality:
+    enabled: false
+    sales_growth_min_pct: 20        # YoY revenue growth % floor, latest fiscal year vs prior
+    pat_growth_min_pct: 40          # YoY net income (PAT) growth % floor, latest fiscal year vs prior
+    max_annualized_volatility_pct: 35   # "low standard deviation" = annualized SD of daily returns, ceiling
+    max_peg: 1.0                    # trailing P/E / PAT growth %, ceiling
+    require_complete_data: false    # if true, a stock with ANY missing metric fails instead of being flagged unverified
+    theme_filter_enabled: false     # restrict to futuristic-sector themes (see src/sector_themes.py)
+    selected_themes: []             # which theme(s) to require when theme_filter_enabled is on
+
 # ---------------------------------------------------------------------------
 # Conviction scoring - weighted, transparent, fully rule-based (no black-box
 # ML claims). Category weights must sum to 100. Each category score is 0-100

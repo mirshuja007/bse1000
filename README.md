@@ -217,6 +217,55 @@ part of momentum scoring.
 
 Note also: ROCE isn't available from yfinance, so ROE stands in for it.
 
+## Growth & Quality screen (beta, unverified) + futuristic-sector themes
+
+A **separate** second-pass filter from the one above, off by default, kept
+apart so it can be refined independently: the "20/40 rule" (20%+ YoY sales
+growth, 40%+ YoY PAT growth, both latest-fiscal-year-vs-prior), low price
+volatility ("low standard deviation"), and PEG < 1. Enable it under
+**Growth & Quality screen (beta)** in the sidebar.
+
+Three different data sources feed this, with three different trust levels:
+
+1. **Sales growth, PAT growth, and PEG's P/E input** - yfinance's annual
+   income statement and `.info`, same unverified-coverage situation as the
+   Fundamentals filter above (no network route to Yahoo from the
+   environment that built this). The "Total Revenue" / "Net Income" row
+   labels are confirmed correct by yfinance's *own* deprecation-warning
+   text, not a live response. Run
+   `python debug_growth_financials.py <SYMBOL> <SYMBOL> ...` on a machine
+   with real internet before trusting this.
+2. **Price volatility ("low SD")** - annualized standard deviation of daily
+   returns, computed from the OHLCV data this app already pulled from Kite
+   for the technical scan. This is the one metric here that's **fully
+   verified** - not a new data source, the same trusted price data every
+   indicator in this app already uses.
+3. **PEG** - computed here as trailing P/E ÷ PAT growth %, deliberately
+   *not* Yahoo's own `pegRatio` field (which has its own unverified
+   coverage) - reusing numbers already fetched keeps it transparent and
+   internally consistent rather than stacking one unverified number on
+   another.
+
+Same missing-data philosophy as the Fundamentals filter: a stock with a
+metric Yahoo doesn't have is flagged `growth_screen_note: "Unverified
+(missing: ...)"`, never silently excluded, unless **Require all 4 metrics
+available** is turned on. Only fetches for stocks that already passed
+every technical filter, and never feeds into the conviction score.
+
+**Futuristic-sector theme filter** ("Principle 5" from your slide - Data
+Centre/AI/Semiconductors, IT Enabled Services & Telecom, Healthcare,
+Digital Financial Services, Green Energy, EMS, Defence Industry): a
+**manually-curated list**, not an automatic classifier - NSE's own sector
+field is too coarse to map onto these themes cleanly (e.g. "Power" mixes
+green energy with coal-fired thermal plants, "Capital Goods" spans
+defence, EMS, and general industrials, so an automatic mapping would
+misclassify a meaningful number of stocks). `data/sector_theme_map.csv` is
+tracked in the repo (curated reference data, like the constituent lists -
+not personal output) and ships with **zero rows tagged** - every stock
+shows `theme: "Unclassified"` until you tell me which symbols belong to
+which theme and I add rows. Enable **Restrict to selected theme(s)** in
+the sidebar once some stocks are tagged. See `src/sector_themes.py`.
+
 ## Tracking past recommendations
 
 **Done** (was on the roadmap as forward-return tracking): click **📌 Track

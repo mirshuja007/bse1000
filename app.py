@@ -27,6 +27,8 @@ from src.auth import (
 from src.config import REPO_ROOT, KiteCredentials, app_password, deep_merge, load_config
 from src.data_fetcher import RateLimiter, fetch_benchmark_history, fetch_one, fetch_universe_history, resolve_benchmark_token
 from src.fundamentals import annotate_with_fundamentals
+from src.growth_screen import annotate_with_growth_screen
+from src import sector_themes as themes
 from src.instruments import build_nse_mapping, build_universe_mapping, combine_mappings, load_mapping, load_nse_mapping
 from src import emailer
 from src.recommendation_log import annotate_with_history, load_recommendation_history, update_recommendation_history
@@ -466,6 +468,50 @@ def sidebar_controls(cfg: dict) -> dict:
             cfg["filters"]["fundamentals"]["require_complete_data"],
         )
 
+    st.sidebar.header("Growth & Quality screen (beta)")
+    st.sidebar.caption(
+        "A separate, evolving panel: the \"20/40 rule\" (sales + PAT growth), low price volatility, "
+        "and PEG < 1. Sales/PAT growth and PEG are sourced from yfinance (same unverified-coverage "
+        "caveat as the Fundamentals filter above - run `python debug_growth_financials.py <SYMBOL>` "
+        "before trusting this). Volatility is computed from this app's own price data, so it's fully "
+        "verified. Applied only to stocks that already pass every filter above."
+    )
+    cfg["filters"]["growth_quality"]["enabled"] = st.sidebar.checkbox(
+        "Apply growth & quality screen", cfg["filters"]["growth_quality"]["enabled"]
+    )
+    if cfg["filters"]["growth_quality"]["enabled"]:
+        cfg["filters"]["growth_quality"]["sales_growth_min_pct"] = st.sidebar.slider(
+            "Min YoY sales growth (%)", 0, 100, int(cfg["filters"]["growth_quality"]["sales_growth_min_pct"])
+        )
+        cfg["filters"]["growth_quality"]["pat_growth_min_pct"] = st.sidebar.slider(
+            "Min YoY PAT growth (%)", 0, 150, int(cfg["filters"]["growth_quality"]["pat_growth_min_pct"])
+        )
+        cfg["filters"]["growth_quality"]["max_annualized_volatility_pct"] = st.sidebar.slider(
+            "Max annualized price volatility (%) - \"low SD\"", 5, 100,
+            int(cfg["filters"]["growth_quality"]["max_annualized_volatility_pct"]),
+        )
+        cfg["filters"]["growth_quality"]["max_peg"] = st.sidebar.slider(
+            "Max PEG", 0.1, 5.0, float(cfg["filters"]["growth_quality"]["max_peg"]), 0.1
+        )
+        cfg["filters"]["growth_quality"]["require_complete_data"] = st.sidebar.checkbox(
+            "Require all 4 metrics available (reject unverified data instead of flagging it)",
+            cfg["filters"]["growth_quality"]["require_complete_data"],
+            key="growth_require_complete",
+        )
+
+    st.sidebar.subheader("Futuristic sector theme")
+    st.sidebar.caption(
+        "Manually-curated, not automatic (data/sector_theme_map.csv) - only stocks you've told me to tag "
+        "will show a theme instead of \"Unclassified\". Send me symbols + themes to grow this list."
+    )
+    cfg["filters"]["growth_quality"]["theme_filter_enabled"] = st.sidebar.checkbox(
+        "Restrict to selected theme(s)", cfg["filters"]["growth_quality"]["theme_filter_enabled"]
+    )
+    if cfg["filters"]["growth_quality"]["theme_filter_enabled"]:
+        cfg["filters"]["growth_quality"]["selected_themes"] = st.sidebar.multiselect(
+            "Theme(s)", themes.THEMES, default=cfg["filters"]["growth_quality"]["selected_themes"]
+        )
+
     st.sidebar.header("Conviction score weights")
     st.sidebar.caption("Relative weights - don't need to sum to 100, they're normalized automatically.")
     weights = cfg["conviction"]["weights"]
@@ -583,6 +629,21 @@ if run_clicked:
                 result_df = annotate_with_fundamentals(result_df, cfg, progress_callback=fnd_progress_cb)
             fnd_progress.empty()
 
+        result_df["theme"] = themes.themes_for(result_df)
+
+        if cfg["filters"]["growth_quality"]["enabled"]:
+            n_growth_candidates = int((result_df["passes_all_filters"] == True).sum())  # noqa: E712
+            growth_progress = st.progress(0.0, text="Checking growth & quality...")
+
+            def growth_progress_cb(done, total):
+                growth_progress.progress(done / total, text=f"Checking growth & quality... {done}/{total}")
+
+            with st.spinner(f"Fetching growth/quality data for {n_growth_candidates} candidates..."):
+                result_df = annotate_with_growth_screen(
+                    result_df, cfg, enriched_cache, progress_callback=growth_progress_cb
+                )
+            growth_progress.empty()
+
     st.session_state.result_df = result_df
     st.session_state.enriched_cache = enriched_cache
     st.session_state.scan_time = datetime.now()
@@ -635,6 +696,10 @@ if "result_df" in st.session_state:
         show_fundamentally_strong_only = (
             st.checkbox("Show only fundamentally strong (beta)", value=False) if fundamentals_checked else False
         )
+        growth_checked = "passes_growth_screen" in result_df.columns
+        show_growth_quality_only = (
+            st.checkbox("Show only growth & quality strong (beta)", value=False) if growth_checked else False
+        )
 
         view = result_df.copy()
         if show_candidates_only:
@@ -642,6 +707,14 @@ if "result_df" in st.session_state:
         view = view[view["conviction_score"] >= min_score]
         if show_fundamentally_strong_only:
             view = view[view["passes_fundamentals"] == True]  # noqa: E712
+        if show_growth_quality_only:
+            view = view[view["passes_growth_screen"] == True]  # noqa: E712
+        if (
+            "theme" in view.columns
+            and cfg["filters"]["growth_quality"]["theme_filter_enabled"]
+            and cfg["filters"]["growth_quality"]["selected_themes"]
+        ):
+            view = view[view["theme"].isin(cfg["filters"]["growth_quality"]["selected_themes"])]
 
         display_cols = [
             "company_name",
@@ -673,6 +746,13 @@ if "result_df" in st.session_state:
             display_cols += [
                 "market_cap_cr", "ebitda_margin_pct", "roe_pct", "debt_to_equity",
                 "passes_fundamentals", "fundamentals_note",
+            ]
+        if "theme" in view.columns:
+            display_cols += ["theme"]
+        if growth_checked:
+            display_cols += [
+                "sales_growth_pct", "pat_growth_pct", "annualized_volatility_pct", "peg",
+                "passes_growth_screen", "growth_screen_note",
             ]
         st.dataframe(view[display_cols], use_container_width=True, height=450)
 
