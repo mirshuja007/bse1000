@@ -3,7 +3,7 @@ network/Kite access required."""
 import pandas as pd
 import pytest
 
-from src import tracker
+from src import github_store, tracker
 
 
 def _bars(rows: list[dict]) -> pd.DataFrame:
@@ -169,3 +169,56 @@ def test_log_pick_allows_retracking_after_previous_pick_closed(tmp_path, monkeyp
     logged, _ = tracker.log_pick(_scan_row())
     assert logged is True
     assert len(tracker.load_tracked_picks()) == 2
+
+
+def test_save_syncs_to_github_when_configured(tmp_path, monkeypatch):
+    monkeypatch.setattr(tracker, "TRACKED_PICKS_FILE", tmp_path / "tracked_picks.csv")
+    monkeypatch.setattr(github_store, "is_configured", lambda: True)
+    monkeypatch.setattr(github_store, "read_file", lambda path: None)  # no file on GitHub yet
+    written = {}
+    monkeypatch.setattr(
+        github_store, "write_file", lambda path, content, message: written.update(path=path, content=content)
+    )
+
+    tracker.log_pick(_scan_row())
+
+    assert written["path"] == tracker.GITHUB_DATA_PATH
+    assert "500325" in written["content"]
+    assert tracker.get_last_sync_error() is None
+
+
+def test_load_reads_from_github_when_configured(monkeypatch):
+    monkeypatch.setattr(github_store, "is_configured", lambda: True)
+    csv_text = "pick_id,date_logged,security_code,status\np1,2024-01-10,500325,OPEN\n"
+    monkeypatch.setattr(github_store, "read_file", lambda path: csv_text)
+
+    picks = tracker.load_tracked_picks()
+    assert len(picks) == 1
+    assert picks.iloc[0]["security_code"] == "500325"
+    assert picks.iloc[0]["status"] == "OPEN"
+
+
+def test_load_returns_empty_when_github_configured_but_no_file_yet(monkeypatch):
+    monkeypatch.setattr(github_store, "is_configured", lambda: True)
+    monkeypatch.setattr(github_store, "read_file", lambda path: None)
+    assert tracker.load_tracked_picks().empty
+
+
+def test_save_records_sync_error_without_crashing(tmp_path, monkeypatch):
+    local_file = tmp_path / "tracked_picks.csv"
+    monkeypatch.setattr(tracker, "TRACKED_PICKS_FILE", local_file)
+    monkeypatch.setattr(github_store, "is_configured", lambda: True)
+    monkeypatch.setattr(github_store, "read_file", lambda path: None)  # no file on GitHub yet
+
+    def failing_write(path, content, message):
+        raise RuntimeError("bad token")
+
+    monkeypatch.setattr(github_store, "write_file", failing_write)
+
+    logged, _ = tracker.log_pick(_scan_row())
+    assert logged is True  # local save still succeeded despite the GitHub sync failing
+    assert "bad token" in tracker.get_last_sync_error()
+    assert local_file.exists()
+    assert "500325" in local_file.read_text()
+
+

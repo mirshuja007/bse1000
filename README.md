@@ -237,6 +237,61 @@ picks** section at the bottom of the app shows every logged pick and a
   far, which is the actual, non-hallucinated answer to "is this scoring any
   good" - see `src/tracker.py`.
 
+## Persisting data across redeploys
+
+**Why this matters:** Streamlit Cloud runs your app in a throwaway
+container. Every redeploy (any git push, including one of mine) wipes that
+container's filesystem completely - which by default silently resets
+`data/tracked_picks.csv` and `data/recommendation_history.csv`, making
+"first recommended date" and your tracked P&L look wrong (it isn't
+computing incorrectly - it's reading from a file that just got erased).
+
+**The fix:** configure `src/github_store.py` to mirror both files to a
+dedicated branch (`data-store` by default) in this GitHub repo, which never
+gets wiped. Deliberately a *separate* branch from the one Streamlit Cloud
+deploys - if it wrote to the deploy branch instead, every save would push a
+commit there and trigger another redeploy, restarting your app mid-session.
+
+Setup:
+1. GitHub → Settings → Developer settings → Personal access tokens →
+   **Fine-grained tokens** → Generate new token.
+2. Scope it to this repository only, with **Contents: Read and write**
+   permission (no other permissions needed).
+3. Set three values in `.env` locally and in Streamlit Cloud's **Secrets**
+   for the deployed app:
+   ```
+   GITHUB_TOKEN=<the token>
+   GITHUB_DATA_REPO=<yourusername>/bse1000
+   GITHUB_DATA_BRANCH=data-store
+   ```
+The sidebar shows whether this is active ("synced to GitHub" vs "local
+only - will be lost on the next redeploy"), and surfaces a warning if a
+sync attempt fails (bad token, network issue) rather than failing silently.
+Without this configured, the app still works - it just falls back to the
+same local-file behavior as before, which is fine for local runs (your own
+machine's filesystem isn't wiped) but not for the public Streamlit Cloud
+deployment.
+
+## Emailing reports
+
+Click **📧 Email report** (bottom of the app) to email the current scan
+results, tracked picks, and recommendation history as CSV attachments to
+an address you type in. Uses Gmail SMTP with an App Password - no new
+paid service, no new Python dependency.
+
+Setup:
+1. Enable 2-Step Verification on the Gmail account you want to send from
+   (required before Google will issue an App Password).
+2. Generate one at https://myaccount.google.com/apppasswords - a
+   16-character code, unrelated to your normal Gmail password.
+3. Set in `.env` locally / Streamlit Cloud Secrets for the deployed app:
+   ```
+   EMAIL_SENDER=youraddress@gmail.com
+   EMAIL_APP_PASSWORD=<the 16-character app password, no spaces>
+   ```
+Without this configured, the button is replaced with a note explaining
+what to set.
+
 ## Roadmap / suggested next steps
 
 Ranked by what would sharpen short-term (1-15 day) alpha the most:

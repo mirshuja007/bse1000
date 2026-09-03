@@ -1,7 +1,7 @@
 """Offline unit tests for src/recommendation_log.py - synthetic data only."""
 import pandas as pd
 
-from src import recommendation_log as rl
+from src import github_store, recommendation_log as rl
 
 
 def _result_row(**overrides) -> dict:
@@ -106,3 +106,37 @@ def test_update_recommendation_history_bumps_times_seen_without_changing_first_s
     assert row["first_seen_price"] == 100.0
     assert row["last_seen_date"] == "2024-01-15"
     assert row["last_seen_price"] == 108.0
+
+
+def test_save_syncs_to_github_when_configured(tmp_path, monkeypatch):
+    monkeypatch.setattr(rl, "HISTORY_FILE", tmp_path / "recommendation_history.csv")
+    monkeypatch.setattr(github_store, "is_configured", lambda: True)
+    written = {}
+    monkeypatch.setattr(
+        github_store, "write_file", lambda path, content, message: written.update(path=path, content=content)
+    )
+
+    empty_history = pd.DataFrame(columns=rl._COLUMNS)
+    day1 = _result_df(_result_row(as_of="2024-01-10"))
+    rl.update_recommendation_history(day1, history=empty_history)
+
+    assert written["path"] == rl.GITHUB_DATA_PATH
+    assert "500325" in written["content"]
+    assert rl.get_last_sync_error() is None
+
+
+def test_load_reads_from_github_when_configured(monkeypatch):
+    monkeypatch.setattr(github_store, "is_configured", lambda: True)
+    csv_text = "security_code,tradingsymbol,first_seen_date,times_seen\n500325,RELIANCE,2024-01-10,3\n"
+    monkeypatch.setattr(github_store, "read_file", lambda path: csv_text)
+
+    history = rl.load_recommendation_history()
+    assert len(history) == 1
+    assert history.iloc[0]["security_code"] == "500325"
+    assert history.iloc[0]["first_seen_date"] == "2024-01-10"
+
+
+def test_load_returns_empty_when_github_configured_but_no_file_yet(monkeypatch):
+    monkeypatch.setattr(github_store, "is_configured", lambda: True)
+    monkeypatch.setattr(github_store, "read_file", lambda path: None)
+    assert rl.load_recommendation_history().empty

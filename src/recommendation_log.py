@@ -8,19 +8,24 @@ choose which ones to track). This module logs *every* passing candidate on
 *every* scan, automatically, so "have I seen this one before, and does it
 still look the same" works even for stocks you never explicitly tracked.
 
-Log entries live in `data/recommendation_history.csv` (git-ignored, like
-the other generated files - this is your personal scan history, not
-sample data for the repo).
+Log entries live in `data/recommendation_history.csv` locally (git-ignored,
+like the other generated files - this is your personal scan history, not
+sample data for the repo) and, when src/github_store.py is configured, are
+mirrored to a dedicated GitHub branch too - the local copy alone doesn't
+survive a Streamlit Cloud redeploy, which wipes the container it lives on.
 """
 from __future__ import annotations
 
+import io
 from datetime import date
 
 import pandas as pd
 
+from src import github_store
 from src.config import REPO_ROOT
 
 HISTORY_FILE = REPO_ROOT / "data" / "recommendation_history.csv"
+GITHUB_DATA_PATH = "data/recommendation_history.csv"
 
 _COLUMNS = [
     "security_code",
@@ -43,19 +48,45 @@ STATUS_STILL_LONG = "Repeat - still long"
 STATUS_EXIT = "Repeat - exit / trail SL"
 
 
-def load_recommendation_history() -> pd.DataFrame:
-    if not HISTORY_FILE.exists():
-        return pd.DataFrame(columns=_COLUMNS)
-    df = pd.read_csv(HISTORY_FILE, dtype={"security_code": str})
+def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     for col in _COLUMNS:
         if col not in df.columns:
             df[col] = None
     return df[_COLUMNS]
 
 
+_last_sync_error: str | None = None
+
+
+def get_last_sync_error() -> str | None:
+    """Non-None if the most recent save reached the local file fine but
+    failed to sync to GitHub (bad token, network issue, etc.)."""
+    return _last_sync_error
+
+
+def load_recommendation_history() -> pd.DataFrame:
+    if github_store.is_configured():
+        content = github_store.read_file(GITHUB_DATA_PATH)
+        if content is None:
+            return pd.DataFrame(columns=_COLUMNS)
+        return _normalize_columns(pd.read_csv(io.StringIO(content), dtype={"security_code": str}))
+
+    if not HISTORY_FILE.exists():
+        return pd.DataFrame(columns=_COLUMNS)
+    return _normalize_columns(pd.read_csv(HISTORY_FILE, dtype={"security_code": str}))
+
+
 def _save_history(df: pd.DataFrame) -> None:
+    global _last_sync_error
     HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(HISTORY_FILE, index=False)
+    df.to_csv(HISTORY_FILE, index=False)  # local copy: fast, and a fallback if the GitHub sync below fails
+
+    if github_store.is_configured():
+        try:
+            github_store.write_file(GITHUB_DATA_PATH, df.to_csv(index=False), "Update recommendation_history.csv")
+            _last_sync_error = None
+        except Exception as exc:
+            _last_sync_error = str(exc)
 
 
 def _price_above_50(row: dict) -> bool:

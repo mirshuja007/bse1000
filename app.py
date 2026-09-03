@@ -28,9 +28,13 @@ from src.config import REPO_ROOT, KiteCredentials, app_password, deep_merge, loa
 from src.data_fetcher import RateLimiter, fetch_benchmark_history, fetch_one, fetch_universe_history, resolve_benchmark_token
 from src.fundamentals import annotate_with_fundamentals
 from src.instruments import build_nse_mapping, build_universe_mapping, combine_mappings, load_mapping, load_nse_mapping
+from src import emailer
 from src.recommendation_log import annotate_with_history, load_recommendation_history, update_recommendation_history
 from src.scanner import run_scan
+from src import github_store
 from src.tracker import CLOSED_STATUSES, load_tracked_picks, log_pick, update_tracked_picks
+from src.tracker import get_last_sync_error as tracker_sync_error
+from src.recommendation_log import get_last_sync_error as history_sync_error
 
 st.set_page_config(page_title="India Momentum Scanner", layout="wide")
 
@@ -197,6 +201,24 @@ def render_universe_selector() -> str:
 
 
 selected_universe = render_universe_selector()
+
+# ---------------------------------------------------------------------------
+# Data persistence status - tracked picks / recommendation history are
+# stored locally by default, which does NOT survive a Streamlit Cloud
+# redeploy (the container gets wiped). Configuring src/github_store.py
+# (GITHUB_TOKEN + GITHUB_DATA_REPO env vars) makes them persist across
+# redeploys instead, by mirroring to a dedicated GitHub branch.
+# ---------------------------------------------------------------------------
+if github_store.is_configured():
+    st.sidebar.caption("💾 Tracked picks / history: synced to GitHub (survives redeploys)")
+else:
+    st.sidebar.caption(
+        "💾 Tracked picks / history: local only - **will be lost on the next redeploy**. "
+        "Set GITHUB_TOKEN + GITHUB_DATA_REPO to persist them (see README)."
+    )
+for sync_error in (tracker_sync_error(), history_sync_error()):
+    if sync_error:
+        st.sidebar.warning(f"GitHub sync failed: {sync_error}")
 
 
 # ---------------------------------------------------------------------------
@@ -854,3 +876,49 @@ else:
         use_container_width=True,
         height=350,
     )
+
+
+# ---------------------------------------------------------------------------
+# Email report - everything currently on this page (scan results, tracked
+# picks, recommendation history) as CSV attachments, on demand.
+# ---------------------------------------------------------------------------
+st.divider()
+st.header("Email report")
+
+if not emailer.is_configured():
+    st.caption(
+        "Not set up yet. Add EMAIL_SENDER and EMAIL_APP_PASSWORD to your .env (or Streamlit Cloud Secrets) "
+        "to enable this - see src/emailer.py for the one-time Gmail App Password setup steps."
+    )
+else:
+    recipient = st.text_input("Send report to (email address)", key="email_recipient")
+    if st.button("📧 Email report"):
+        if not recipient.strip():
+            st.error("Enter a recipient email address first.")
+        else:
+            attachments = {}
+            if "result_df" in st.session_state and not st.session_state.result_df.empty:
+                attachments["scan_results.csv"] = st.session_state.result_df.to_csv(index=False)
+            if not tracked.empty:
+                attachments["tracked_picks.csv"] = tracked.to_csv(index=False)
+            history_for_email = load_recommendation_history()
+            if not history_for_email.empty:
+                attachments["recommendation_history.csv"] = history_for_email.to_csv(index=False)
+
+            if not attachments:
+                st.warning("Nothing to send yet - run a scan or track a pick first.")
+            else:
+                try:
+                    with st.spinner(f"Sending to {recipient}..."):
+                        emailer.send_report_email(
+                            recipient,
+                            subject="India Momentum Scanner - report",
+                            body=(
+                                f"Attached: {', '.join(attachments.keys())}.\n\n"
+                                "Not financial advice - use alongside your own risk management."
+                            ),
+                            attachments=attachments,
+                        )
+                    st.success(f"Sent to {recipient} ({', '.join(attachments.keys())}).")
+                except Exception as exc:
+                    st.error(f"Failed to send: {exc}")

@@ -9,21 +9,26 @@ of what actually happened to it afterward - the only way to know if the
 scoring is any good, and required reading before trusting it with real size.
 
 Log entries are per-pick snapshots taken at the moment you choose to track
-one (via the "Track this pick" button in the Stock Detail panel), stored in
-`data/tracked_picks.csv` (git-ignored - this is your personal trading
-record, not sample data for the repo).
-"""
+one (via the "Track this pick" button in the Stock Detail panel). Stored in
+`data/tracked_picks.csv` locally (git-ignored - this is your personal
+trading record, not sample data for the repo) and, when src/github_store.py
+is configured, mirrored to a dedicated GitHub branch too - the local copy
+alone doesn't survive a Streamlit Cloud redeploy, which wipes the container
+it lives on."""
 from __future__ import annotations
 
+import io
 from datetime import date, datetime
 from pathlib import Path
 
 import pandas as pd
 
+from src import github_store
 from src.config import REPO_ROOT
 from src.indicators import compute_indicators, latest_snapshot
 
 TRACKED_PICKS_FILE = REPO_ROOT / "data" / "tracked_picks.csv"
+GITHUB_DATA_PATH = "data/tracked_picks.csv"
 
 OPEN_STATUS = "OPEN"
 CLOSED_STATUSES = {"HIT_TARGET", "HIT_STOPLOSS", "EXPIRED", "CLOSED_MANUAL"}
@@ -62,19 +67,47 @@ def _empty_tracked_picks_df() -> pd.DataFrame:
     return pd.DataFrame(columns=_COLUMNS)
 
 
-def load_tracked_picks() -> pd.DataFrame:
-    if not TRACKED_PICKS_FILE.exists():
-        return _empty_tracked_picks_df()
-    df = pd.read_csv(TRACKED_PICKS_FILE, dtype={"security_code": str})
+def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     for col in _COLUMNS:
         if col not in df.columns:
             df[col] = None
     return df[_COLUMNS]
 
 
+_last_sync_error: str | None = None
+
+
+def get_last_sync_error() -> str | None:
+    """Non-None if the most recent save reached the local file fine but
+    failed to sync to GitHub (bad token, network issue, etc.) - the app
+    surfaces this as a warning so a silent sync failure doesn't get
+    mistaken for successful cross-redeploy persistence."""
+    return _last_sync_error
+
+
+def load_tracked_picks() -> pd.DataFrame:
+    if github_store.is_configured():
+        content = github_store.read_file(GITHUB_DATA_PATH)
+        if content is None:
+            return _empty_tracked_picks_df()
+        return _normalize_columns(pd.read_csv(io.StringIO(content), dtype={"security_code": str}))
+
+    if not TRACKED_PICKS_FILE.exists():
+        return _empty_tracked_picks_df()
+    return _normalize_columns(pd.read_csv(TRACKED_PICKS_FILE, dtype={"security_code": str}))
+
+
 def _save_tracked_picks(df: pd.DataFrame) -> None:
+    global _last_sync_error
     TRACKED_PICKS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(TRACKED_PICKS_FILE, index=False)
+    df.to_csv(TRACKED_PICKS_FILE, index=False)  # local copy: fast, and a fallback if the GitHub sync below fails
+
+    if github_store.is_configured():
+        try:
+            github_store.write_file(GITHUB_DATA_PATH, df.to_csv(index=False), "Update tracked_picks.csv")
+            _last_sync_error = None
+        except Exception as exc:
+            _last_sync_error = str(exc)
 
 
 def log_pick(scan_row: dict, as_of: date | None = None) -> tuple[bool, str]:
