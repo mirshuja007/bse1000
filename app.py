@@ -178,14 +178,14 @@ render_login_panel()
 # ---------------------------------------------------------------------------
 # Which constituent list(s) to scan. Kept separate from the trading-style
 # preset below since it's a "what universe" choice, not a "how to score it"
-# choice. BSE 1000 and Nifty 500 overlap heavily but aren't identical -
-# picking "Both" scans the union, deduped so a dual-listed company that
-# resolves to the same NSE instrument from both lists is only scored once
-# (see combine_mappings in src/instruments.py).
+# choice. BSE 1000 and Nifty Total Market overlap heavily but aren't
+# identical - picking "Both" scans the union, deduped so a dual-listed
+# company that resolves to the same NSE instrument from both lists is only
+# scored once (see combine_mappings in src/instruments.py).
 # ---------------------------------------------------------------------------
 UNIVERSE_OPTIONS = {
     "BSE 1000": "bse1000",
-    "Nifty 500": "nifty500",
+    "Nifty Total Market": "niftytotalmarket",
     "Both (deduped)": "both",
 }
 
@@ -194,8 +194,9 @@ def render_universe_selector() -> str:
     st.sidebar.header("Universe")
     choice = st.sidebar.radio("Scan which constituents?", list(UNIVERSE_OPTIONS.keys()), key="universe_choice")
     st.sidebar.caption(
-        "Nifty 500 resolves faster and more reliably (exact NSE symbol match) than BSE 1000 "
-        "(fuzzy name match, since BSE codes aren't NSE symbols)."
+        "Nifty Total Market resolves faster and more reliably (exact NSE symbol match) than BSE 1000 "
+        "(fuzzy name match, since BSE codes aren't NSE symbols). It's NSE's broadest equity index - "
+        "Nifty 500 plus ~250 additional smaller-cap names."
     )
     return UNIVERSE_OPTIONS[choice]
 
@@ -508,7 +509,7 @@ def load_selected_mapping(kite, universe_choice: str, force_refresh: bool = Fals
             if force_refresh
             else load_mapping(refresh_with_kite=kite)
         )
-    if universe_choice in ("nifty500", "both"):
+    if universe_choice in ("niftytotalmarket", "both"):
         mappings.append(
             build_nse_mapping(kite, force_refresh_instruments=force_refresh)
             if force_refresh
@@ -797,8 +798,8 @@ else:
     st.info("Click **Run scan** to fetch live data from Kite and score the selected universe.")
     st.caption(
         "First run will also build the instrument mapping for whichever universe(s) you picked above "
-        "(data/universe_mapping.csv for BSE 1000, data/nifty500_mapping.csv for Nifty 500). "
-        "Nifty 500 resolves by exact NSE symbol match; only the BSE 1000 mapping needs a "
+        "(data/universe_mapping.csv for BSE 1000, data/nifty_total_market_mapping.csv for Nifty Total Market). "
+        "Nifty Total Market resolves by exact NSE symbol match; only the BSE 1000 mapping needs a "
         "match_confidence review, since it relies on fuzzy name matching."
     )
 

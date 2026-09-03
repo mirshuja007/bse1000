@@ -28,7 +28,7 @@ def main() -> None:
     parser.add_argument("--refresh-mapping", action="store_true")
     parser.add_argument(
         "--universe",
-        choices=["bse1000", "nifty500", "both"],
+        choices=["bse1000", "niftytotalmarket", "both"],
         default="bse1000",
         help="Which constituent universe(s) to scan (default: bse1000).",
     )
@@ -48,7 +48,7 @@ def main() -> None:
             if args.refresh_mapping
             else load_mapping(refresh_with_kite=kite)
         )
-    if args.universe in ("nifty500", "both"):
+    if args.universe in ("niftytotalmarket", "both"):
         mappings.append(
             build_nse_mapping(kite, force_refresh_instruments=True)
             if args.refresh_mapping

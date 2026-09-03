@@ -10,10 +10,14 @@ src/instruments.py):
   resolution. The `Symbol` column (the numeric BSE scrip code) is the
   reliable key and is matched exactly against Kite's BSE instrument dump,
   then fuzzy-matched to an NSE tradingsymbol for liquidity.
-- Nifty 500 (`load_nifty500_universe`): NSE's own official constituent
-  list. Its `Symbol` column IS already the exact NSE tradingsymbol (e.g.
-  "RELIANCE"), so resolution is a plain exact-match join against Kite's
-  NSE instrument dump - no fuzzy name matching needed at all.
+- Nifty Total Market (`load_nifty_total_market_universe`): NSE's own
+  official constituent list for its broadest equity index - Nifty 500 plus
+  ~250 additional smaller-cap names (754 total; verified by set comparison
+  against the old Nifty 500 file when this replaced it - every one of the
+  500 was a subset). Its `Symbol` column IS already the exact NSE
+  tradingsymbol (e.g. "RELIANCE"), so resolution is a plain exact-match
+  join against Kite's NSE instrument dump - no fuzzy name matching needed
+  at all.
 
 Both loaders normalize to the same `security_code` / `company_name_raw` /
 `sector` / `universe` column shape so the rest of the app (scanner,
@@ -30,7 +34,7 @@ import pandas as pd
 from src.config import REPO_ROOT
 
 DEFAULT_UNIVERSE_FILE = REPO_ROOT / "data" / "bse_1000_constituents.csv"
-DEFAULT_NIFTY500_UNIVERSE_FILE = REPO_ROOT / "data" / "nifty_500_constituents.csv"
+DEFAULT_NIFTY_TOTAL_MARKET_UNIVERSE_FILE = REPO_ROOT / "data" / "nifty_total_market_constituents.csv"
 
 _SUFFIX_WORDS = {
     "LIMITED",
@@ -105,11 +109,12 @@ def load_universe(path: str | Path = DEFAULT_UNIVERSE_FILE) -> pd.DataFrame:
     return df
 
 
-def load_nifty500_universe(path: str | Path = DEFAULT_NIFTY500_UNIVERSE_FILE) -> pd.DataFrame:
-    """Load NSE's official Nifty 500 constituent list. Unlike BSE 1000's
-    `Symbol` (a numeric scrip code), this file's `Symbol` column is already
-    the exact NSE tradingsymbol - so `security_code` here doubles as the
-    tradingsymbol used for the exact-match join in build_nse_mapping()."""
+def load_nifty_total_market_universe(path: str | Path = DEFAULT_NIFTY_TOTAL_MARKET_UNIVERSE_FILE) -> pd.DataFrame:
+    """Load NSE's official Nifty Total Market constituent list. Unlike BSE
+    1000's `Symbol` (a numeric scrip code), this file's `Symbol` column is
+    already the exact NSE tradingsymbol - so `security_code` here doubles
+    as the tradingsymbol used for the exact-match join in
+    build_nse_mapping()."""
     df = pd.read_csv(path, dtype={"Symbol": str})
     df = df.rename(
         columns={
@@ -122,6 +127,6 @@ def load_nifty500_universe(path: str | Path = DEFAULT_NIFTY500_UNIVERSE_FILE) ->
     df["company_name_raw"] = df["company_name_raw"].str.strip()
     df["sector"] = df["sector"].fillna("Unclassified").str.strip()
     df["name_key"] = df["company_name_raw"].apply(normalize_name)
-    df["universe"] = "NIFTY500"
+    df["universe"] = "NIFTYTOTALMKT"
     df = df.dropna(subset=["security_code"]).drop_duplicates(subset="security_code").reset_index(drop=True)
     return df

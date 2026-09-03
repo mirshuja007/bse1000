@@ -11,7 +11,7 @@
 outputs/
 *.parquet
 data/universe_mapping.csv
-data/nifty500_mapping.csv
+data/nifty_total_market_mapping.csv
 data/kite_instruments_*.csv
 data/tracked_picks.csv
 data/recommendation_history.csv

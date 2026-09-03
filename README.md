@@ -1,7 +1,7 @@
 # India Momentum Scanner
 
-A configurable momentum/breakout scanner for the BSE 1000 and Nifty 500
-universes, built on Kite Connect. It screens for volume surges, 50/200-DMA breakouts, RSI
+A configurable momentum/breakout scanner for the BSE 1000 and Nifty Total
+Market universes, built on Kite Connect. It screens for volume surges, 50/200-DMA breakouts, RSI
 strength and other trend/volatility characteristics, then ranks survivors
 with a transparent, rule-based **conviction score** aimed at a **1-15
 trading-day** swing/momentum horizon.
@@ -56,13 +56,13 @@ treat them as slightly exposed and recommend, at your convenience:
 config/scanner_config.yaml   All screening/scoring parameters (edit or override live in the UI)
 data/bse_1000_constituents.csv   BSE 1000 universe (company name, BSE scrip code, sector)
 data/universe_mapping.csv    Generated: BSE code -> Kite instrument (NSE preferred), git-ignored
-data/nifty_500_constituents.csv   Nifty 500 universe, NSE's own official list (company, NSE symbol, sector)
-data/nifty500_mapping.csv    Generated: Nifty 500 symbol -> Kite NSE instrument, git-ignored
+data/nifty_total_market_constituents.csv   Nifty Total Market universe, NSE's own official list (company, NSE symbol, sector)
+data/nifty_total_market_mapping.csv    Generated: symbol -> Kite NSE instrument, git-ignored
 src/
   config.py        YAML + .env loading, no secrets in YAML ever
   auth.py           Automated Kite login (password+TOTP) with a manual-login fallback
   universe.py       Loads/normalizes both constituent lists
-  instruments.py    Resolves each constituent to a tradable Kite instrument (BSE fuzzy match + Nifty 500 exact match)
+  instruments.py    Resolves each constituent to a tradable Kite instrument (BSE fuzzy match + Nifty Total Market exact match)
   data_fetcher.py    Rate-limited historical OHLCV pulls, with local caching
   indicators.py      RSI, ATR, ADX, MACD, DMA breakouts, Donchian, OBV, relative strength...
   scanner.py         Applies configurable filters + sector-strength ranking
@@ -72,10 +72,10 @@ run_scan.py           Headless CLI runner, e.g. for a cron job
 tests/                Offline unit tests (no network required)
 ```
 
-### Two universes: BSE 1000 and Nifty 500
+### Two universes: BSE 1000 and Nifty Total Market
 
 Pick which to scan from the "Universe" section at the top of the sidebar
-(BSE 1000 / Nifty 500 / Both, deduped). They resolve very differently:
+(BSE 1000 / Nifty Total Market / Both, deduped). They resolve very differently:
 
 - **BSE 1000** — your source file lists BSE scrip codes (e.g. `500325`).
   Most names are dual-listed and far more liquid on NSE, so
@@ -92,16 +92,19 @@ Pick which to scan from the "Universe" section at the top of the sidebar
   automated name matching across ~1000 tickers. You can hand-edit that
   file; the scanner just reads it going forward.
 
-- **Nifty 500** — NSE's own official constituent list (`ind_nifty500list.csv`)
-  already gives the exact NSE tradingsymbol per company, so
-  `build_nse_mapping()` is a plain exact-match join against Kite's NSE
-  instrument dump. No fuzzy matching, no confidence score, no manual review
-  needed - every resolvable row is a certain match.
+- **Nifty Total Market** — NSE's own official constituent list
+  (`ind_niftytotalmarket_list.csv`, 754 constituents - Nifty 500 plus
+  ~250 additional smaller-cap names; verified by direct set comparison
+  when this replaced the narrower Nifty 500 list) already gives the exact
+  NSE tradingsymbol per company, so `build_nse_mapping()` is a plain
+  exact-match join against Kite's NSE instrument dump. No fuzzy matching,
+  no confidence score, no manual review needed - every resolvable row is
+  a certain match.
 
 Selecting "Both" scans the union, deduped: a company present in both lists
 that resolves to the same NSE instrument is only scored once, tagged
-`BSE1000+NIFTY500` in the results table's `universe` column, so provenance
-isn't lost.
+`BSE1000+NIFTYTOTALMKT` in the results table's `universe` column, so
+provenance isn't lost.
 
 ## Setup
 
