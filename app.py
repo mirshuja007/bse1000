@@ -28,6 +28,7 @@ from src.config import REPO_ROOT, KiteCredentials, app_password, deep_merge, loa
 from src.data_fetcher import RateLimiter, fetch_benchmark_history, fetch_one, fetch_universe_history, resolve_benchmark_token
 from src.fundamentals import annotate_with_fundamentals
 from src.growth_screen import annotate_with_growth_screen
+from src.breakout_radar import aggregate_historical_hit_rate, scan_breakout_radar
 from src import sector_themes as themes
 from src.instruments import build_nse_mapping, build_universe_mapping, combine_mappings, load_mapping, load_nse_mapping
 from src import emailer
@@ -957,6 +958,105 @@ else:
         use_container_width=True,
         height=350,
     )
+
+
+# ---------------------------------------------------------------------------
+# Breakout Radar - a separate watchlist, not part of the main scan or
+# conviction score. Reuses the raw OHLCV already fetched into
+# enriched_cache for the last scan, so it needs a scan to have run first.
+# ---------------------------------------------------------------------------
+st.divider()
+st.header("Breakout Radar")
+st.caption(
+    "A separate watchlist from the main scan above, with two tiers: **Fresh Breakout** (already "
+    "breaking out - same donchian_breakout + volume_surge signals as the main scan) and "
+    "**Pre-Breakout Watch** (hasn't broken out yet, but is coiling tightly below its N-day high with "
+    "BOTH ATR% and Bollinger Band width contracting - a documented pre-breakout setup, NOT a "
+    "prediction that a rally will follow). Runs across whichever timeframes you pick by resampling "
+    "the same price data already fetched for the main scan - no extra Kite calls. Monthly needs far "
+    "more history than this app fetches by default (~13 monthly bars vs. the ~20+ a signal needs) - "
+    "expect most stocks to show \"insufficient data\" for monthly unless you raise `data.history_days`."
+)
+
+if "enriched_cache" not in st.session_state or not st.session_state.enriched_cache:
+    st.info("Run a scan above first - Breakout Radar reuses that price data instead of a separate fetch.")
+else:
+    radar_timeframes = st.multiselect(
+        "Timeframes to scan", ["daily", "weekly", "monthly"], default=["daily", "weekly"], key="radar_timeframes"
+    )
+    if st.button("🔭 Scan for breakout setups") and radar_timeframes:
+        with st.spinner(f"Scanning {len(st.session_state.enriched_cache)} stocks across {', '.join(radar_timeframes)}..."):
+            st.session_state.radar_df = scan_breakout_radar(
+                st.session_state.enriched_cache, st.session_state.mapping, cfg, timeframes=radar_timeframes
+            )
+
+    if "radar_df" in st.session_state and not st.session_state.radar_df.empty:
+        radar_df = st.session_state.radar_df
+        fresh = radar_df[radar_df["breakout_timeframes"] != ""]
+        watch = radar_df[(radar_df["watch_timeframes"] != "") & (radar_df["breakout_timeframes"] == "")]
+
+        m1, m2 = st.columns(2)
+        m1.metric("Fresh breakouts", len(fresh))
+        m2.metric("Pre-breakout watch", len(watch))
+
+        radar_display_cols = [
+            "company_name", "tradingsymbol", "exchange", "watch_timeframes", "breakout_timeframes",
+            "n_watch_timeframes",
+        ]
+
+        st.subheader("Fresh breakouts")
+        if fresh.empty:
+            st.caption("None right now.")
+        else:
+            st.dataframe(fresh[radar_display_cols], use_container_width=True, height=250)
+
+        st.subheader("Pre-breakout watch")
+        if watch.empty:
+            st.caption("None right now.")
+        else:
+            st.dataframe(
+                watch.sort_values("n_watch_timeframes", ascending=False)[radar_display_cols],
+                use_container_width=True,
+                height=250,
+            )
+
+        st.download_button(
+            "Download full Breakout Radar detail as CSV (all timeframe columns)",
+            radar_df.to_csv(index=False),
+            file_name="breakout_radar.csv",
+        )
+
+        st.subheader("Historical hit-rate check (small sample - read this before trusting it)")
+        st.caption(
+            "How often has the Pre-Breakout Watch signature, computed retroactively across this app's own "
+            "fetched history, actually preceded a rally? This is NOT a rigorous backtest - one period, "
+            "whatever history got fetched (~1 year by default), often a small number of flagged instances. "
+            "Read n_flagged before trusting the percentage next to it, and compare against the baseline rate."
+        )
+        hit_rate_tf = st.selectbox("Timeframe to check", radar_timeframes, key="hit_rate_timeframe")
+        if st.button("Check historical hit rate"):
+            with st.spinner("Computing historical hit rate across the scanned universe..."):
+                hit_rate = aggregate_historical_hit_rate(st.session_state.enriched_cache, hit_rate_tf, cfg)
+            if not hit_rate["n_flagged"]:
+                st.warning(
+                    f"No historical Pre-Breakout Watch flags found for {hit_rate_tf} in the fetched history "
+                    "for this universe - too small a sample to say anything."
+                )
+            else:
+                r = cfg["filters"]["breakout_radar"]
+                h1, h2, h3 = st.columns(3)
+                h1.metric("Stocks included", hit_rate["n_stocks_included"])
+                h2.metric("Times flagged", hit_rate["n_flagged"])
+                h3.metric(
+                    f"Hit rate when flagged (≥{r['hit_rate_target_return_pct']:.0f}% within {r['hit_rate_forward_days']}d)",
+                    f"{hit_rate['flagged_hit_rate_pct']}%",
+                )
+                st.caption(
+                    f"Baseline (unflagged days) hit rate for comparison: {hit_rate['baseline_hit_rate_pct']}% "
+                    f"across {hit_rate['n_baseline']} days. If the flagged rate isn't meaningfully above "
+                    f"baseline, or n_flagged ({hit_rate['n_flagged']}) is small, this isn't evidence of a "
+                    "real edge yet - just what happened to show up in this one window."
+                )
 
 
 # ---------------------------------------------------------------------------

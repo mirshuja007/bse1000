@@ -344,6 +344,50 @@ Setup:
 Without this configured, the button is replaced with a note explaining
 what to set.
 
+## Breakout Radar
+
+A separate watchlist panel (below the main scan results), for catching a
+move earlier than "wait for the breakout candle and RSI is already at 78."
+Two tiers:
+
+- **Fresh Breakout** - already breaking out today. Reuses the exact same
+  `donchian_breakout` + `volume_surge` signals the main scan already
+  computes - "it's happening now."
+- **Pre-Breakout Watch** - hasn't broken out yet, but is coiling tightly
+  (within `max_pct_below_pivot`, default 5%) just below its N-day high,
+  with **both** ATR% and Bollinger Band width contracting. This is a
+  documented technical pattern (volatility contraction before expansion),
+  **not a prediction** - no indicator can see the future, and this screen
+  doesn't claim to.
+
+Runs across whichever of **daily / weekly / monthly** you pick, by
+resampling the exact OHLCV already fetched for the main scan (`src/timeframe.py`)
+through the same indicator pipeline (`src/indicators.py`) - a "weekly
+RSI(14)" or "monthly Donchian(20)" just applies the same periods to bars
+spanning more calendar time, standard multi-timeframe practice. No extra
+Kite API calls.
+
+**Known limitation - read before enabling monthly**: a Donchian(20)/ATR(14)
+-based signal needs ~20+ bars of that timeframe. With this app's default
+`data.history_days` (400 calendar days ≈ 13 monthly bars), monthly will
+mostly report `insufficient_data` rather than a signal - correctly, not
+silently guessed at. Daily (~260 bars) and weekly (~57 bars) both have
+enough by default. To get real monthly signals, raise `data.history_days`
+to ~1500-2000 - slower scans, more Kite calls per stock.
+
+**Historical hit-rate check** - click **Check historical hit rate** to see
+how often the Pre-Breakout Watch signature, evaluated retroactively across
+the fetched history, actually preceded a rally (default: ≥10% within 15
+bars) - compared against a baseline (unflagged days) for the same
+universe. Read this as exactly what it is: **one period, whatever history
+got fetched (~1 year by default), often a small number of flagged
+instances** - not a rigorous multi-cycle backtest. `n_flagged` is shown
+prominently for a reason: a 2-for-3 hit rate is not evidence of an edge.
+Proper backtesting (replaying history day-by-day across market cycles
+without lookahead bias) remains a separate, bigger project - see Roadmap.
+
+See `src/breakout_radar.py`.
+
 ## Roadmap / suggested next steps
 
 Ranked by what would sharpen short-term (1-15 day) alpha the most:

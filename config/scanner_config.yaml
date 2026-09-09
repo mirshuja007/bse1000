@@ -108,6 +108,21 @@ filters:
     theme_filter_enabled: false     # restrict to futuristic-sector themes (see src/sector_themes.py)
     selected_themes: []             # which theme(s) to require when theme_filter_enabled is on
 
+  # Breakout Radar - a separate watchlist panel (see src/breakout_radar.py),
+  # not part of the main scan or conviction score. Two tiers: Fresh
+  # Breakout (already breaking out - reuses donchian_breakout/volume_surge
+  # above) and Pre-Breakout Watch (coiling tightly below its N-day high
+  # with BOTH ATR% and Bollinger Band width contracting - a documented
+  # pre-breakout signature, not a prediction). Runs across daily/weekly/
+  # monthly by resampling the same OHLCV already fetched for the main
+  # scan - monthly needs far more history than this app fetches by
+  # default to produce a signal at all (see module docstring).
+  breakout_radar:
+    bollinger_period: 20             # Bollinger Band period (same convention as the classic 20-period band)
+    max_pct_below_pivot: 5.0         # "coiling tightly": must be within this % of the N-day high, not yet broken it
+    hit_rate_forward_days: 15        # historical hit-rate check: look this many bars ahead for a rally
+    hit_rate_target_return_pct: 10.0 # ...counted as a "hit" if the forward high reaches at least this % above the flagged day's close
+
 # ---------------------------------------------------------------------------
 # Conviction scoring - weighted, transparent, fully rule-based (no black-box
 # ML claims). Category weights must sum to 100. Each category score is 0-100
