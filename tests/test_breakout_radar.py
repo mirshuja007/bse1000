@@ -156,6 +156,52 @@ def test_historical_hit_rate_excludes_trailing_bars_with_incomplete_forward_wind
     assert result["n_flagged"] == n - 5
 
 
+def test_evaluate_timeframe_daily_handles_already_enriched_input():
+    # Regression test: app.py actually feeds Breakout Radar the main scan's
+    # enriched_cache, which has ALREADY been through compute_indicators()
+    # (adx/rsi/sma50/donchian_high/etc. already present) - not fresh raw
+    # OHLCV like every other test in this file uses. Re-running
+    # compute_indicators() on top of that output must not append duplicate
+    # columns (which previously made latest.get("adx") return a Series
+    # instead of a scalar and crash pd.isna() with a ValueError).
+    rng = np.random.default_rng(6)
+    base = 100 + rng.normal(0, 1, 150).cumsum() * 0.05
+    closes = list(base) + [base[-1] + 10]
+    volumes = [100_000.0] * 150 + [400_000.0]
+    raw_df = make_ohlcv(closes, volumes=volumes)
+
+    config = _cfg()
+    already_enriched = compute_indicators(raw_df, config, benchmark=None)
+    assert not already_enriched.columns.duplicated().any()
+
+    prepared = br._prepare_timeframe_df(already_enriched, "daily", config)
+    assert prepared is not None
+    assert not prepared.columns.duplicated().any()
+
+    result = br.evaluate_timeframe(already_enriched, "daily", config)
+    assert result["insufficient_data"] is False
+    assert result["is_fresh_breakout"] is True
+    assert isinstance(result["adx"], float)
+    assert isinstance(result["rsi"], float)
+
+
+def test_scan_breakout_radar_handles_already_enriched_raw_history():
+    # Same regression, through the actual public entry point app.py calls.
+    rng = np.random.default_rng(7)
+    base = 100 + rng.normal(0, 1, 150).cumsum() * 0.05
+    closes = list(base) + [base[-1] + 10]
+    volumes = [100_000.0] * 150 + [400_000.0]
+    raw_df = make_ohlcv(closes, volumes=volumes)
+    config = _cfg()
+    already_enriched = compute_indicators(raw_df, config, benchmark=None)
+
+    mapping = pd.DataFrame(
+        [{"security_code": "A1", "company_name_raw": "Alpha Co", "tradingsymbol": "ALPHA", "exchange": "NSE"}]
+    )
+    result = br.scan_breakout_radar({"A1": already_enriched}, mapping, config, timeframes=["daily", "weekly"])
+    assert len(result) == 1
+
+
 def test_aggregate_historical_hit_rate_skips_stocks_with_insufficient_history():
     rng = np.random.default_rng(4)
     long_history = make_ohlcv(list(100 + rng.normal(0, 1, 150).cumsum() * 0.05))

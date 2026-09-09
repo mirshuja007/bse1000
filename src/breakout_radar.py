@@ -82,13 +82,27 @@ def compute_precursor_signals(enriched: pd.DataFrame, config: dict) -> pd.DataFr
     return out
 
 
+_BASE_OHLCV_COLUMNS = ["date", "open", "high", "low", "close", "volume"]
+
+
+def _base_ohlcv(raw_ohlcv: pd.DataFrame) -> pd.DataFrame:
+    """Strips down to just the raw OHLCV columns. Callers (the main scan's
+    enriched_cache) may pass a frame that's already been through
+    compute_indicators() - re-running that pipeline on top of its own
+    output would append duplicate adx/rsi/etc. columns rather than replace
+    them, so every caller here starts from a clean base regardless of
+    timeframe."""
+    return raw_ohlcv[_BASE_OHLCV_COLUMNS]
+
+
 def _prepare_timeframe_df(raw_ohlcv: pd.DataFrame, timeframe: str, config: dict) -> pd.DataFrame | None:
     """Resample + run the indicator pipeline + precursor signals. Returns
     None (not an empty/partial frame) when there isn't enough history to
     compute a period-20 rolling window reliably - an explicit "don't know"
     rather than a misleading NaN-filled result."""
     rule = TIMEFRAME_RULES[timeframe]
-    bars = raw_ohlcv if rule is None else resample_ohlcv(raw_ohlcv, rule)
+    base = _base_ohlcv(raw_ohlcv)
+    bars = base if rule is None else resample_ohlcv(base, rule)
     if len(bars) < MIN_BARS_FOR_SIGNAL:
         return None
     enriched = compute_indicators(bars, config, benchmark=None)
@@ -97,7 +111,8 @@ def _prepare_timeframe_df(raw_ohlcv: pd.DataFrame, timeframe: str, config: dict)
 
 def _bars_available(raw_ohlcv: pd.DataFrame, timeframe: str) -> int:
     rule = TIMEFRAME_RULES[timeframe]
-    return len(raw_ohlcv) if rule is None else len(resample_ohlcv(raw_ohlcv, rule))
+    base = _base_ohlcv(raw_ohlcv)
+    return len(base) if rule is None else len(resample_ohlcv(base, rule))
 
 
 def evaluate_timeframe(raw_ohlcv: pd.DataFrame, timeframe: str, config: dict) -> dict:
