@@ -83,6 +83,22 @@ def test_evaluate_timeframe_daily_detects_fresh_breakout():
     assert result["insufficient_data"] is False
     assert result["is_fresh_breakout"] is True
     assert result["is_watch"] is False  # already broke out, not "pre"
+    # Strength/false-breakout-check columns should be populated and sane.
+    assert result["rsi"] is not None and 0 <= result["rsi"] <= 100
+    assert result["adx"] is not None and result["adx"] >= 0
+    assert result["close_strength"] is not None and 0 <= result["close_strength"] <= 1
+    assert result["pct_from_pivot"] > 0  # already broke out -> positive = extended above the pivot
+    assert result["pct_from_pivot"] == -result["pct_below_pivot"]
+
+
+def test_evaluate_timeframe_pct_from_pivot_is_negative_while_still_coiling():
+    rng = np.random.default_rng(5)
+    closes = 100 + rng.normal(0, 1, 150).cumsum() * 0.05  # never breaks its own high
+    df = make_ohlcv(list(closes))
+    result = br.evaluate_timeframe(df, "daily", _cfg())
+    assert result["insufficient_data"] is False
+    assert result["is_fresh_breakout"] is False
+    assert result["pct_from_pivot"] <= 0
 
 
 def test_scan_breakout_radar_summarizes_across_stocks():

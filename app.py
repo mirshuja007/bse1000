@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+import re
+
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -1003,6 +1005,20 @@ else:
             "company_name", "tradingsymbol", "exchange", "watch_timeframes", "breakout_timeframes",
             "n_watch_timeframes",
         ]
+        # Strength / false-breakout-check columns, shown for whichever
+        # timeframe was actually scanned first (daily preferred, since
+        # it's most relevant for "is this breakout real right now").
+        primary_tf = next((tf for tf in ["daily", "weekly", "monthly"] if f"{tf}_rsi" in radar_df.columns), None)
+        if primary_tf:
+            strength_cols = [f"{primary_tf}_{c}" for c in ["rsi", "adx", "close_strength", "volume_surge", "pct_from_pivot"]]
+            radar_display_cols += strength_cols
+            st.caption(
+                f"RSI / ADX / close_strength / volume_surge / pct_from_pivot below are from the **{primary_tf}** "
+                "timeframe. Higher ADX and close_strength near 1 (closed near the day's high, not faded back "
+                "down) both argue against a false breakout; a breakout on weak volume_surge is the classic "
+                "false-breakout tell. pct_from_pivot: negative = still coiling below the pivot, positive = "
+                "% already run since breaking out."
+            )
 
         st.subheader("Fresh breakouts")
         if fresh.empty:
@@ -1079,7 +1095,10 @@ else:
         else:
             attachments = {}
             if "result_df" in st.session_state and not st.session_state.result_df.empty:
-                attachments["scan_results.csv"] = st.session_state.result_df.to_csv(index=False)
+                preset_label = st.session_state.get("_applied_preset", "Custom (manual)")
+                preset_slug = re.sub(r"[^a-z0-9]+", "_", preset_label.lower()).strip("_")
+                top7 = st.session_state.result_df.sort_values("conviction_score", ascending=False).head(7)
+                attachments[f"top7_conviction_{preset_slug}.csv"] = top7.to_csv(index=False)
             if not tracked.empty:
                 attachments["tracked_picks.csv"] = tracked.to_csv(index=False)
             history_for_email = load_recommendation_history()

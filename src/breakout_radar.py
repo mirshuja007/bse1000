@@ -60,15 +60,19 @@ def bollinger_band_width(close: pd.Series, period: int = 20, num_std: float = 2.
 
 
 def compute_precursor_signals(enriched: pd.DataFrame, config: dict) -> pd.DataFrame:
-    """Adds bb_width / bb_width_chg20 / pct_below_pivot / is_watch to a
-    frame already run through compute_indicators() (needs donchian_high
-    and atr_pct_chg20 to already be present)."""
+    """Adds bb_width / bb_width_chg20 / pct_below_pivot / pct_from_pivot /
+    is_watch to a frame already run through compute_indicators() (needs
+    donchian_high and atr_pct_chg20 to already be present)."""
     out = enriched.copy()
     r = config["filters"]["breakout_radar"]
 
     out["bb_width"] = bollinger_band_width(out["close"], r["bollinger_period"])
     out["bb_width_chg20"] = out["bb_width"] - out["bb_width"].shift(20)
     out["pct_below_pivot"] = (out["donchian_high"] - out["close"]) / out["donchian_high"] * 100
+    # Signed version of the same distance: negative while still coiling
+    # below the pivot, positive once broken out - "how extended is this
+    # breakout already" is just this number read on the other side of zero.
+    out["pct_from_pivot"] = -out["pct_below_pivot"]
 
     not_yet_broken_out = out["close"] <= out["donchian_high"]
     coiling_tight = out["pct_below_pivot"] <= r["max_pct_below_pivot"]
@@ -124,9 +128,19 @@ def evaluate_timeframe(raw_ohlcv: pd.DataFrame, timeframe: str, config: dict) ->
         "is_fresh_breakout": is_fresh_breakout,
         "is_watch": bool(latest.get("is_watch")),
         "pct_below_pivot": _num("pct_below_pivot", 1),
+        "pct_from_pivot": _num("pct_from_pivot", 1),
         "atr_pct_chg20": _num("atr_pct_chg20", 2),
         "bb_width_chg20": _num("bb_width_chg20", 4),
         "volume_surge": _num("volume_surge", 2),
+        # Not-a-false-breakout checks: RSI/ADX show whether there's real
+        # trend strength behind the move (a breakout with ADX < ~20 is
+        # happening in a non-trending regime, more prone to failing);
+        # close_strength near 1 means the bar closed near its high (buyers
+        # in control into the close) rather than fading back down after
+        # poking above the pivot intraday.
+        "rsi": _num("rsi", 1),
+        "adx": _num("adx", 1),
+        "close_strength": _num("close_strength", 2),
     }
 
 
