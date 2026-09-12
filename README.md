@@ -388,6 +388,38 @@ without lookahead bias) remains a separate, bigger project - see Roadmap.
 
 See `src/breakout_radar.py`.
 
+## Gann Price-Time Panel (experimental)
+
+A separate, experimental watchlist panel (below Breakout Radar), based on
+W.D. Gann's "price-time squaring" method: for each stock, it finds the most
+recent **confirmed swing high/low** (a local extreme with `swing_lookback`
+bars of price action on both sides, so it never calls out an unconfirmed
+peak/trough), then projects forward **time windows** at `cycle_angles_degrees`
+(default 90°/180°/270°/360°, treated as calendar days from the anchor) and
+computes the **Square-of-Nine** price levels tied to each window (the
+standard add/subtract convention: each 180° of rotation shifts √price by 1.0).
+
+**Read this before using it - it is different from every other panel in
+this app.** RSI/ADX/Donchian and Breakout Radar's hit-rate check are all
+things this app can objectively backtest. Gann's anchor choice, angle set,
+and price-scaling convention are matters of convention within the Gann
+community, not proven rules - there is no way to backtest "did the market
+respect this window" the way Breakout Radar backtests its own signature.
+This module documents exactly which convention it picked at each step (see
+the `src/gann_panel.py` module docstring) so nothing here is a guess
+dressed up as a result.
+
+**Time gives the alert, price gives the signal**: a window is only marked
+`bullish_confirmed` / `bearish_confirmed` once price actually breaks the
+"signal candle" (the trading bar closest to the projected date)'s high or
+low within `confirmation_lookforward_days` - the window date alone never
+implies a direction. Windows still in the future show as `upcoming`.
+
+Reuses the same price data as Breakout Radar - no extra Kite calls. See
+`src/gann_panel.py` and the `filters.gann_panel` block in
+`config/scanner_config.yaml` for every tunable (swing confirmation window,
+which angles to project, how far ahead/behind to surface windows).
+
 ## Roadmap / suggested next steps
 
 Ranked by what would sharpen short-term (1-15 day) alpha the most:

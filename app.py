@@ -31,6 +31,7 @@ from src.data_fetcher import RateLimiter, fetch_benchmark_history, fetch_one, fe
 from src.fundamentals import annotate_with_fundamentals
 from src.growth_screen import annotate_with_growth_screen
 from src.breakout_radar import aggregate_historical_hit_rate, scan_breakout_radar
+from src.gann_panel import scan_gann_panel
 from src import sector_themes as themes
 from src.instruments import build_nse_mapping, build_universe_mapping, combine_mappings, load_mapping, load_nse_mapping
 from src import emailer
@@ -1073,6 +1074,68 @@ else:
                     f"baseline, or n_flagged ({hit_rate['n_flagged']}) is small, this isn't evidence of a "
                     "real edge yet - just what happened to show up in this one window."
                 )
+
+
+# ---------------------------------------------------------------------------
+# Gann Price-Time Panel - a SEPARATE, experimental watchlist, not part of
+# the main scan, conviction score, or Breakout Radar. Reuses the same
+# price data as Breakout Radar.
+# ---------------------------------------------------------------------------
+st.divider()
+st.header("Gann Price-Time Panel (experimental)")
+st.caption(
+    "Projects forward **time windows** from each stock's most recent confirmed swing high/low, using "
+    "W.D. Gann's price-time squaring method, plus the Square-of-Nine price levels tied to each window. "
+    "**Read this before using it**: unlike every other panel in this app, there is no objective way to "
+    "backtest whether the market actually respects these windows - the anchor, the angles, and the "
+    "price-scaling convention are all matters of Gann-community convention, not proven rules. Time "
+    "gives the alert, price gives the signal: a window is only marked bullish/bearish *confirmed* once "
+    "price actually breaks the signal candle's high/low - the window date alone predicts nothing."
+)
+
+if "enriched_cache" not in st.session_state or not st.session_state.enriched_cache:
+    st.info("Run a scan above first - the Gann panel reuses that price data instead of a separate fetch.")
+else:
+    if st.button("🌀 Scan Gann windows"):
+        with st.spinner(f"Scanning {len(st.session_state.enriched_cache)} stocks for price-time windows..."):
+            st.session_state.gann_df = scan_gann_panel(st.session_state.enriched_cache, st.session_state.mapping, cfg)
+
+    if "gann_df" in st.session_state:
+        gann_df = st.session_state.gann_df
+        if gann_df.empty:
+            st.caption("No confirmed swing pivots with a time window in the configured range right now.")
+        else:
+            display_cols = [
+                "company_name", "tradingsymbol", "exchange", "anchor_type", "anchor_date", "anchor_price",
+                "angle_degrees", "window_date", "days_to_window", "level_up", "level_down", "confirmation",
+            ]
+            upcoming = gann_df[gann_df["confirmation"] == "upcoming"]
+            past = gann_df[gann_df["confirmation"] != "upcoming"]
+
+            st.subheader("Upcoming windows")
+            st.caption("Watch these dates - not a trade signal until price confirms.")
+            if upcoming.empty:
+                st.caption("None in the configured horizon.")
+            else:
+                st.dataframe(
+                    upcoming.sort_values("days_to_window")[display_cols], use_container_width=True, height=250
+                )
+
+            st.subheader("Recent windows (with confirmation status)")
+            if past.empty:
+                st.caption("None in the configured recent-past range.")
+            else:
+                st.dataframe(
+                    past.sort_values("window_date", ascending=False)[display_cols],
+                    use_container_width=True,
+                    height=250,
+                )
+
+            st.download_button(
+                "Download full Gann panel detail as CSV",
+                gann_df.to_csv(index=False),
+                file_name="gann_panel.csv",
+            )
 
 
 # ---------------------------------------------------------------------------

@@ -123,6 +123,23 @@ filters:
     hit_rate_forward_days: 15        # historical hit-rate check: look this many bars ahead for a rally
     hit_rate_target_return_pct: 10.0 # ...counted as a "hit" if the forward high reaches at least this % above the flagged day's close
 
+  # Gann Price-Time Squaring panel - a SEPARATE, experimental watchlist
+  # (see src/gann_panel.py), not part of the main scan, conviction score,
+  # or Breakout Radar. Projects forward "time windows" from each stock's
+  # most recent confirmed swing high/low using W.D. Gann's price-time
+  # squaring method, plus the associated Square-of-Nine price levels.
+  # Unlike every filter above, there is no way to objectively backtest
+  # this - see the module docstring for exactly which Gann conventions
+  # were chosen and why they're conventions, not proven rules.
+  gann_panel:
+    swing_lookback: 10                # bars required on BOTH sides of a bar to confirm it as a swing high/low
+    anchor_window_days: 250           # only look for a swing pivot within this many days of the most recent bar
+    cycle_angles_degrees: [90, 180, 270, 360]  # Gann's core cycle divisions of a 360-day/degree "year" - add/remove freely
+    window_tolerance_days: 3          # +/- days around a projected date that still counts as "in the window"
+    confirmation_lookforward_days: 10 # bars after the signal candle to check for a high/low break
+    upcoming_horizon_days: 60         # only surface windows up to this many days in the future
+    recent_past_days: 30              # also surface (and check confirmation for) windows from this many days ago
+
 # ---------------------------------------------------------------------------
 # Conviction scoring - weighted, transparent, fully rule-based (no black-box
 # ML claims). Category weights must sum to 100. Each category score is 0-100
