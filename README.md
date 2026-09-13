@@ -326,10 +326,23 @@ deployment.
 
 ## Emailing reports
 
-Click **📧 Email report** (bottom of the app) to email the current scan
-results, tracked picks, and recommendation history as CSV attachments to
-an address you type in. Uses Gmail SMTP with an App Password - no new
-paid service, no new Python dependency.
+Click **📧 Email report** (bottom of the app) to email everything currently
+available, in one go, to an address you type in:
+
+- `top7_conviction_<preset>.csv` - the 7 highest conviction_score candidates
+- `conviction_calls_<preset>.csv` - **every** Very High / High / Moderate
+  Conviction candidate (Watchlist-tier excluded), not just the top 7
+- `trade_card_<SYMBOL>.png` - today's top-3 Trade Card infographics (see below)
+- `breakout_radar.csv` - the full Breakout Radar detail, if you've run that scan
+- `gann_panel.csv` - the full Gann Price-Time Panel detail, if you've run that scan
+- `tracked_picks.csv` and `recommendation_history.csv`, if either has data
+
+`<preset>` is whichever trading-style preset is active (manual / swing /
+positional / the Chartink-style one). Anything not yet generated for this
+session (e.g. you haven't clicked "Scan Gann windows") is simply skipped,
+never sent empty. Uses Gmail SMTP with an App Password - no new paid
+service, and no new Python dependency for the email itself (Pillow, for
+the trade-card images, was already a Streamlit/plotting dependency).
 
 Setup:
 1. Enable 2-Step Verification on the Gmail account you want to send from
@@ -419,6 +432,25 @@ Reuses the same price data as Breakout Radar - no extra Kite calls. See
 `src/gann_panel.py` and the `filters.gann_panel` block in
 `config/scanner_config.yaml` for every tunable (swing confirmation window,
 which angles to project, how far ahead/behind to surface windows).
+
+## Daily Trade Cards
+
+A share-ready infographic (1080x1080 PNG, sized for WhatsApp) for each of
+today's top picks - below the Gann panel, click **🎴 Generate today's trade
+cards**. Every number on a card (entry, stop, target, conviction
+score/tier, RSI/ADX/volume, a one-line rationale) is read straight from
+the same scan results table above it; this only lays that data out as an
+image. Picks the top N (default 3) candidates by conviction_score among
+those passing every filter for whichever trading-style preset is active -
+the same selection rule the email report's top-7 CSV already uses, so the
+cards and that CSV always name the same stocks.
+
+Every card carries a date/time stamp and a fixed disclaimer ("Not
+financial advice... rule-based, algorithmic output... consult a
+SEBI-registered advisor") baked into the image itself, so it stays
+attached wherever the PNG gets forwarded. Download individual cards from
+the app, or check **Email report** below - it attaches today's top 3
+automatically. See `src/trade_card.py`.
 
 ## False-Move Filter (beta)
 

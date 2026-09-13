@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 import smtplib
 from email.mime.application import MIMEApplication
+from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
@@ -28,10 +29,13 @@ def is_configured() -> bool:
     return bool(os.environ.get("EMAIL_SENDER") and os.environ.get("EMAIL_APP_PASSWORD"))
 
 
-def send_report_email(recipient: str, subject: str, body: str, attachments: dict[str, str]) -> None:
-    """attachments: {filename: csv_text_content}. Raises on any failure -
-    misconfiguration, an invalid recipient, or an SMTP error - rather than
-    swallowing it, so a failed send is never mistaken for a sent one."""
+def send_report_email(recipient: str, subject: str, body: str, attachments: dict[str, str | bytes]) -> None:
+    """attachments: {filename: content} - content is either CSV text (str)
+    or raw image bytes (e.g. a PNG trade card); a .png filename with bytes
+    content is attached as an image, everything else as a generic file
+    attachment. Raises on any failure - misconfiguration, an invalid
+    recipient, or an SMTP error - rather than swallowing it, so a failed
+    send is never mistaken for a sent one."""
     sender = os.environ.get("EMAIL_SENDER")
     app_password = os.environ.get("EMAIL_APP_PASSWORD")
     if not sender or not app_password:
@@ -46,7 +50,10 @@ def send_report_email(recipient: str, subject: str, body: str, attachments: dict
     msg.attach(MIMEText(body, "plain"))
 
     for filename, content in attachments.items():
-        part = MIMEApplication(content.encode("utf-8"), Name=filename)
+        if isinstance(content, bytes):
+            part = MIMEImage(content, name=filename) if filename.lower().endswith(".png") else MIMEApplication(content, Name=filename)
+        else:
+            part = MIMEApplication(content.encode("utf-8"), Name=filename)
         part["Content-Disposition"] = f'attachment; filename="{filename}"'
         msg.attach(part)
 

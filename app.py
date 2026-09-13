@@ -33,6 +33,7 @@ from src.growth_screen import annotate_with_growth_screen
 from src.breakout_radar import aggregate_historical_hit_rate, scan_breakout_radar
 from src.gann_panel import scan_gann_panel
 from src.false_move_filter import annotate_with_false_move_check
+from src.trade_card import generate_daily_trade_cards, image_to_png_bytes
 from src import sector_themes as themes
 from src.instruments import build_nse_mapping, build_universe_mapping, combine_mappings, load_mapping, load_nse_mapping
 from src import emailer
@@ -1185,6 +1186,47 @@ else:
 
 
 # ---------------------------------------------------------------------------
+# Daily Trade Cards - a share-ready infographic (sized for WhatsApp) for
+# each of today's top picks. Not a new signal: every number on a card
+# comes straight from result_df, same as the main results table above.
+# ---------------------------------------------------------------------------
+st.divider()
+st.header("Daily Trade Cards")
+st.caption(
+    "A share-ready infographic for each of today's top picks - entry/stop/target, conviction score, "
+    "and a fixed disclaimer, date-stamped. Every number comes straight from the scan above; this just "
+    "lays it out as an image sized for WhatsApp. Not financial advice."
+)
+
+if "result_df" not in st.session_state or st.session_state.result_df.empty:
+    st.info("Run a scan above first - trade cards are built from that scan's top picks.")
+else:
+    top_n = st.slider("How many top picks", 1, 10, 3, key="trade_card_top_n")
+    if st.button("🎴 Generate today's trade cards"):
+        preset_label = st.session_state.get("_applied_preset", "Custom (manual)")
+        with st.spinner(f"Rendering top {top_n} trade card(s)..."):
+            st.session_state.trade_cards = generate_daily_trade_cards(
+                st.session_state.result_df, preset_label, top_n=top_n, as_of=datetime.now()
+            )
+
+    if "trade_cards" in st.session_state:
+        cards = st.session_state.trade_cards
+        if not cards:
+            st.caption("No candidates pass every filter for the active preset right now - nothing to card.")
+        else:
+            for symbol, img in cards:
+                png_bytes = image_to_png_bytes(img)
+                st.image(png_bytes, width=380)
+                st.download_button(
+                    f"Download {symbol} trade card (PNG)",
+                    png_bytes,
+                    file_name=f"trade_card_{symbol}_{datetime.now().strftime('%Y%m%d')}.png",
+                    mime="image/png",
+                    key=f"dl_card_{symbol}",
+                )
+
+
+# ---------------------------------------------------------------------------
 # Email report - everything currently on this page (scan results, tracked
 # picks, recommendation history) as CSV attachments, on demand.
 # ---------------------------------------------------------------------------
@@ -1203,11 +1245,32 @@ else:
             st.error("Enter a recipient email address first.")
         else:
             attachments = {}
+            preset_label = st.session_state.get("_applied_preset", "Custom (manual)")
+            preset_slug = re.sub(r"[^a-z0-9]+", "_", preset_label.lower()).strip("_")
+
             if "result_df" in st.session_state and not st.session_state.result_df.empty:
-                preset_label = st.session_state.get("_applied_preset", "Custom (manual)")
-                preset_slug = re.sub(r"[^a-z0-9]+", "_", preset_label.lower()).strip("_")
-                top7 = st.session_state.result_df.sort_values("conviction_score", ascending=False).head(7)
+                result_df_for_email = st.session_state.result_df
+                top7 = result_df_for_email.sort_values("conviction_score", ascending=False).head(7)
                 attachments[f"top7_conviction_{preset_slug}.csv"] = top7.to_csv(index=False)
+
+                conviction_calls = result_df_for_email[
+                    result_df_for_email["conviction_tier"].isin(
+                        ["Very High Conviction", "High Conviction", "Moderate Conviction"]
+                    )
+                ].sort_values("conviction_score", ascending=False)
+                if not conviction_calls.empty:
+                    attachments[f"conviction_calls_{preset_slug}.csv"] = conviction_calls.to_csv(index=False)
+
+                trade_cards_for_email = generate_daily_trade_cards(result_df_for_email, preset_label, top_n=3)
+                for symbol, img in trade_cards_for_email:
+                    attachments[f"trade_card_{symbol}.png"] = image_to_png_bytes(img)
+
+            if "radar_df" in st.session_state and not st.session_state.radar_df.empty:
+                attachments["breakout_radar.csv"] = st.session_state.radar_df.to_csv(index=False)
+
+            if "gann_df" in st.session_state and not st.session_state.gann_df.empty:
+                attachments["gann_panel.csv"] = st.session_state.gann_df.to_csv(index=False)
+
             if not tracked.empty:
                 attachments["tracked_picks.csv"] = tracked.to_csv(index=False)
             history_for_email = load_recommendation_history()
