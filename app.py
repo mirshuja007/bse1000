@@ -32,6 +32,7 @@ from src.fundamentals import annotate_with_fundamentals
 from src.growth_screen import annotate_with_growth_screen
 from src.breakout_radar import aggregate_historical_hit_rate, scan_breakout_radar
 from src.gann_panel import scan_gann_panel
+from src.false_move_filter import annotate_with_false_move_check
 from src import sector_themes as themes
 from src.instruments import build_nse_mapping, build_universe_mapping, combine_mappings, load_mapping, load_nse_mapping
 from src import emailer
@@ -516,6 +517,35 @@ def sidebar_controls(cfg: dict) -> dict:
             "Theme(s)", themes.THEMES, default=cfg["filters"]["growth_quality"]["selected_themes"]
         )
 
+    st.sidebar.header("False-Move filter (beta)")
+    st.sidebar.caption(
+        "A SECOND PASS on top of whichever trading-style preset is active (Manual/Swing/Positional/"
+        "Chartink) - applied only to stocks that already pass every filter above. Flags "
+        "**distribution_risk** (a fresh breakout + a top-reversal candle + a weekly RSI that isn't "
+        "confirming - looks like a false breakout) and **accumulation_signal** (the mirror: a fresh "
+        "breakdown + a bottom-reversal candle + a resilient weekly RSI - looks like a false breakdown). "
+        "Built entirely from price data already fetched for the main scan - no new data source, no beta "
+        "data-coverage caveat like the two screens above."
+    )
+    cfg["filters"]["false_move_filter"]["enabled"] = st.sidebar.checkbox(
+        "Apply False-Move filter", cfg["filters"]["false_move_filter"]["enabled"]
+    )
+    if cfg["filters"]["false_move_filter"]["enabled"]:
+        cfg["filters"]["false_move_filter"]["pattern_lookback_days"] = st.sidebar.slider(
+            "Reversal-candle lookback (days after breakout/breakdown)",
+            1, 10, int(cfg["filters"]["false_move_filter"]["pattern_lookback_days"]),
+        )
+        rsi_bearish_max, rsi_bullish_min = st.sidebar.slider(
+            "Weekly/daily RSI zone boundaries (bearish < / neutral / bullish >=)",
+            0, 100,
+            (
+                int(cfg["filters"]["false_move_filter"]["rsi_bearish_max"]),
+                int(cfg["filters"]["false_move_filter"]["rsi_bullish_min"]),
+            ),
+        )
+        cfg["filters"]["false_move_filter"]["rsi_bearish_max"] = rsi_bearish_max
+        cfg["filters"]["false_move_filter"]["rsi_bullish_min"] = rsi_bullish_min
+
     st.sidebar.header("Conviction score weights")
     st.sidebar.caption("Relative weights - don't need to sum to 100, they're normalized automatically.")
     weights = cfg["conviction"]["weights"]
@@ -648,6 +678,10 @@ if run_clicked:
                 )
             growth_progress.empty()
 
+        if cfg["filters"]["false_move_filter"]["enabled"]:
+            with st.spinner("Checking for false-breakout / false-breakdown signatures..."):
+                result_df = annotate_with_false_move_check(result_df, cfg, enriched_cache)
+
     st.session_state.result_df = result_df
     st.session_state.enriched_cache = enriched_cache
     st.session_state.scan_time = datetime.now()
@@ -704,6 +738,11 @@ if "result_df" in st.session_state:
         show_growth_quality_only = (
             st.checkbox("Show only growth & quality strong (beta)", value=False) if growth_checked else False
         )
+        false_move_checked = "false_move_verdict" in result_df.columns
+        hide_distribution_risk = (
+            st.checkbox("Hide distribution-risk flags (beta - possible false breakout)", value=False)
+            if false_move_checked else False
+        )
 
         view = result_df.copy()
         if show_candidates_only:
@@ -713,6 +752,8 @@ if "result_df" in st.session_state:
             view = view[view["passes_fundamentals"] == True]  # noqa: E712
         if show_growth_quality_only:
             view = view[view["passes_growth_screen"] == True]  # noqa: E712
+        if hide_distribution_risk:
+            view = view[view["false_move_verdict"] != "distribution_risk"]
         if (
             "theme" in view.columns
             and cfg["filters"]["growth_quality"]["theme_filter_enabled"]
@@ -757,6 +798,11 @@ if "result_df" in st.session_state:
             display_cols += [
                 "sales_growth_pct", "pat_growth_pct", "annualized_volatility_pct", "peg",
                 "passes_growth_screen", "growth_screen_note",
+            ]
+        if false_move_checked:
+            display_cols += [
+                "weekly_rsi", "direction_zone", "recent_breakout", "recent_breakdown",
+                "bearish_patterns", "bullish_patterns", "false_move_verdict",
             ]
         st.dataframe(view[display_cols], use_container_width=True, height=450)
 

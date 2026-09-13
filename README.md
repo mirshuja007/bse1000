@@ -420,6 +420,49 @@ Reuses the same price data as Breakout Radar - no extra Kite calls. See
 `config/scanner_config.yaml` for every tunable (swing confirmation window,
 which angles to project, how far ahead/behind to surface windows).
 
+## False-Move Filter (beta)
+
+A **second pass on top of whichever trading-style preset is active**
+(Manual / Swing / Positional / Chartink-style) - not a replacement for it,
+an extra check layered on candidates that already passed everything else.
+Unlike the Fundamentals and Growth & Quality screens, this uses zero new
+data - it's built entirely from the OHLCV already fetched for the main
+scan, so there's no yfinance-coverage caveat.
+
+It flags two setups:
+
+- **`distribution_risk`** - a fresh breakout (`donchian_breakout`, same
+  signal the main scan already computes) where, within
+  `pattern_lookback_days`, a classic top-reversal candle also printed
+  (Bearish Engulfing / Evening Star / Shooting Star) **and** the weekly
+  RSI isn't confirming the daily strength. Read together: price broke to
+  a new high, a reversal candle showed up right at that high, and the
+  bigger timeframe doesn't endorse it - the textbook signature of smart
+  money distributing into a breakout retail is chasing.
+- **`accumulation_signal`** - the mirror image: a fresh breakdown (this
+  module's own `donchian_low`, symmetric to the main scan's
+  `donchian_high`) with a bottom-reversal candle (Bullish Engulfing /
+  Morning Star / Hammer) **and** a weekly RSI holding up better than the
+  breakdown suggests - the textbook signature of smart money accumulating
+  into a breakdown retail is panicking out of.
+
+The weekly-vs-daily RSI zones (60+ bullish / 40-60 neutral / below 40
+bearish) mirror a dual-timeframe "Direction" framework shared with this
+app: a move only counts as *confirmed* when both timeframes agree, and a
+`bearish_bounce` or `strong_bearish` weekly reading against a fresh daily
+breakout is exactly the mismatch this filter is built to catch (and the
+mirror for breakdowns). And per the same source material: a reversal
+candle only means something *at a level* - so the candle check only looks
+in the days right around the breakout/breakdown, never anywhere else on
+the chart.
+
+Toggle it on in the sidebar ("False-Move filter (beta)"); once a scan has
+run with it enabled, use "Hide distribution-risk flags" above the results
+table to filter them out of view. See `src/false_move_filter.py` for the
+exact candlestick-pattern definitions - ordinary, backtestable technical
+analysis (unlike the Gann panel), all standard/commonly-cited versions of
+each pattern, documented inline.
+
 ## Roadmap / suggested next steps
 
 Ranked by what would sharpen short-term (1-15 day) alpha the most:

@@ -140,6 +140,21 @@ filters:
     upcoming_horizon_days: 60         # only surface windows up to this many days in the future
     recent_past_days: 30              # also surface (and check confirmation for) windows from this many days ago
 
+  # False-Move Filter - a SECOND PASS on top of whichever trading-style
+  # preset is active (Manual/Swing/Positional/Chartink-style), not a
+  # replacement for it. Flags "distribution_risk" (a fresh breakout plus a
+  # top-reversal candle plus a non-confirming weekly RSI - looks like a
+  # false breakout) and "accumulation_signal" (the mirror: a fresh
+  # breakdown plus a bottom-reversal candle plus a resilient weekly RSI -
+  # looks like a false breakdown). Built entirely from OHLCV already
+  # fetched for the main scan - no new data source. See
+  # src/false_move_filter.py for the exact candlestick-pattern definitions.
+  false_move_filter:
+    enabled: false
+    pattern_lookback_days: 3   # only look for a reversal candle within this many days of the breakout/breakdown
+    rsi_bullish_min: 60        # RSI zone boundaries (matches the source material's weekly/daily "Direction" matrix: 60+/40-60/<40)
+    rsi_bearish_max: 40
+
 # ---------------------------------------------------------------------------
 # Conviction scoring - weighted, transparent, fully rule-based (no black-box
 # ML claims). Category weights must sum to 100. Each category score is 0-100
