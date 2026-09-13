@@ -1217,15 +1217,16 @@ else:
         if not cards:
             st.caption("Nothing scored for the active preset right now - nothing to card.")
         else:
-            for symbol, img in cards:
+            st.caption(f"{len(cards)} trade card(s) generated.")
+            for rank, (symbol, img) in enumerate(cards, start=1):
                 png_bytes = image_to_png_bytes(img)
                 st.image(png_bytes, width=380)
                 st.download_button(
                     f"Download {symbol} trade card (PNG)",
                     png_bytes,
-                    file_name=f"trade_card_{symbol}_{datetime.now().strftime('%Y%m%d')}.png",
+                    file_name=f"trade_card_{rank}_{symbol}_{datetime.now().strftime('%Y%m%d')}.png",
                     mime="image/png",
-                    key=f"dl_card_{symbol}",
+                    key=f"dl_card_{rank}_{symbol}",
                 )
 
 

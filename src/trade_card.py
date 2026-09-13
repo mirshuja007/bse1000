@@ -5,10 +5,12 @@ fixed disclaimer.
 Not a new signal - every number on the card (entry, stop, target,
 conviction tier/score, RSI/ADX/volume) is read straight from the same
 `result_df` row the main scan already produced. This module only draws
-it as an image; `generate_daily_trade_cards` picks the top N candidates
-by conviction_score among those passing the active preset's filters -
-the same selection rule the email report's top-N CSV attachment already
-uses, so the cards and that CSV always agree on "today's top picks."
+it as an image; `generate_daily_trade_cards` picks the top N by
+conviction_score across EVERY stock scored for the active preset - no
+`passes_all_filters` requirement, so a card can surface a name that
+missed one filter threshold if its conviction score still ranks high
+enough (flagged "NOT ALL FILTERS PASSED" on the card itself when that
+happens, so the relaxed selection is never hidden).
 
 Font handling: tries common system TrueType fonts (present on most Linux
 deployments, including Streamlit Community Cloud, since Pillow/matplotlib
