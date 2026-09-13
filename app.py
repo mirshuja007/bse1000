@@ -1194,14 +1194,17 @@ st.divider()
 st.header("Daily Trade Cards")
 st.caption(
     "A share-ready infographic for each of today's top picks - entry/stop/target, conviction score, "
-    "and a fixed disclaimer, date-stamped. Every number comes straight from the scan above; this just "
+    "and a fixed disclaimer, date-stamped. Ranked by conviction_score across **every stock scored for "
+    "the active preset** - not just ones that passed every technical filter, so pick your own count and "
+    "judge the borderline ones yourself. Every number comes straight from the scan above; this just "
     "lays it out as an image sized for WhatsApp. Not financial advice."
 )
 
 if "result_df" not in st.session_state or st.session_state.result_df.empty:
-    st.info("Run a scan above first - trade cards are built from that scan's top picks.")
+    st.info("Run a scan above first - trade cards are built from that scan's results.")
 else:
-    top_n = st.slider("How many top picks", 1, 10, 3, key="trade_card_top_n")
+    max_picks = max(1, min(50, len(st.session_state.result_df)))
+    top_n = st.slider("How many picks", 1, max_picks, min(3, max_picks), key="trade_card_top_n")
     if st.button("🎴 Generate today's trade cards"):
         preset_label = st.session_state.get("_applied_preset", "Custom (manual)")
         with st.spinner(f"Rendering top {top_n} trade card(s)..."):
@@ -1212,7 +1215,7 @@ else:
     if "trade_cards" in st.session_state:
         cards = st.session_state.trade_cards
         if not cards:
-            st.caption("No candidates pass every filter for the active preset right now - nothing to card.")
+            st.caption("Nothing scored for the active preset right now - nothing to card.")
         else:
             for symbol, img in cards:
                 png_bytes = image_to_png_bytes(img)

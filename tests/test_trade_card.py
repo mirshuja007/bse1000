@@ -41,6 +41,16 @@ def test_render_trade_card_returns_correctly_sized_image():
     assert img.size == (tc.CARD_WIDTH, tc.CARD_HEIGHT)
 
 
+def test_render_trade_card_renders_for_a_non_passing_stock_without_error():
+    # Now that trade cards are selected from the entire conviction ranking
+    # (no passes_all_filters exclusivity), a borderline/non-passing stock
+    # must still render cleanly - just with the "NOT ALL FILTERS PASSED"
+    # flag rather than being refused.
+    row = make_row(passes_all_filters=False)
+    img = tc.render_trade_card(row, rank=1, preset_label="Swing (3-7 days)")
+    assert img.size == (tc.CARD_WIDTH, tc.CARD_HEIGHT)
+
+
 def test_render_trade_card_handles_missing_optional_fields():
     row = make_row(stop_loss=None, target=None, risk_pct=None, reward_pct=None, rsi=None, adx=None, volume_surge=None)
     img = tc.render_trade_card(row, rank=2, preset_label="Custom (manual)")
@@ -56,18 +66,18 @@ def test_image_to_png_bytes_round_trips():
     assert reopened.size == (tc.CARD_WIDTH, tc.CARD_HEIGHT)
 
 
-def test_generate_daily_trade_cards_only_uses_passing_candidates_ranked_by_score():
+def test_generate_daily_trade_cards_ranks_by_score_with_no_passes_all_filters_exclusivity():
     result_df = pd.DataFrame(
         [
             make_row(tradingsymbol="A", conviction_score=90.0, passes_all_filters=True),
-            make_row(tradingsymbol="B", conviction_score=95.0, passes_all_filters=False),  # excluded
+            make_row(tradingsymbol="B", conviction_score=95.0, passes_all_filters=False),  # NOT excluded anymore
             make_row(tradingsymbol="C", conviction_score=70.0, passes_all_filters=True),
             make_row(tradingsymbol="D", conviction_score=85.0, passes_all_filters=True),
         ]
     )
     cards = tc.generate_daily_trade_cards(result_df, preset_label="Swing (3-7 days)", top_n=3)
     symbols = [sym for sym, _ in cards]
-    assert symbols == ["A", "D", "C"]  # ranked by score, B excluded despite highest score
+    assert symbols == ["B", "A", "D"]  # ranked purely by conviction_score, across the whole scan
 
 
 def test_generate_daily_trade_cards_respects_top_n():

@@ -120,6 +120,12 @@ def render_trade_card(row: pd.Series, rank: int, preset_label: str, as_of: datet
 
     rank_label = f"TOP PICK #{rank}"
     draw.text((pad, 130), rank_label, font=_font(26, bold=True), fill=_GRAY)
+    passes_flag = row.get("passes_all_filters")
+    if pd.notna(passes_flag) and not bool(passes_flag):
+        flag_font = _font(22, bold=True)
+        flag_text = "NOT ALL FILTERS PASSED"
+        flag_x = pad + draw.textlength(rank_label, font=_font(26, bold=True)) + 24
+        draw.text((flag_x, 133), flag_text, font=flag_font, fill=_RED)
     preset_w = draw.textlength(preset_label, font=_font(24))
     draw.text((CARD_WIDTH - pad - preset_w, 132), preset_label, font=_font(24), fill=_GRAY)
 
@@ -202,13 +208,16 @@ def image_to_png_bytes(img: Image.Image) -> bytes:
 def generate_daily_trade_cards(
     result_df: pd.DataFrame, preset_label: str, top_n: int = 3, as_of: datetime | None = None
 ) -> list[tuple[str, Image.Image]]:
-    """Top N candidates by conviction_score among those passing every
-    filter for the active preset. Returns [(tradingsymbol, image), ...],
+    """Top N by conviction_score across EVERY stock scored for the active
+    preset - no `passes_all_filters` requirement. Ranking by
+    conviction_score already reflects trend/momentum/volume/breakout
+    quality/relative/sector strength; a stock a hair short of one filter
+    threshold isn't excluded from consideration here the way it is from
+    the main "candidates" table. Returns [(tradingsymbol, image), ...],
     ranked best first."""
     if result_df is None or result_df.empty:
         return []
-    candidates = result_df[result_df["passes_all_filters"] == True]  # noqa: E712
-    top = candidates.sort_values("conviction_score", ascending=False).head(top_n)
+    top = result_df.sort_values("conviction_score", ascending=False).head(top_n)
     return [
         (str(row["tradingsymbol"]), render_trade_card(row, rank=i + 1, preset_label=preset_label, as_of=as_of))
         for i, (_, row) in enumerate(top.iterrows())

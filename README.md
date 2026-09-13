@@ -440,17 +440,20 @@ today's top picks - below the Gann panel, click **🎴 Generate today's trade
 cards**. Every number on a card (entry, stop, target, conviction
 score/tier, RSI/ADX/volume, a one-line rationale) is read straight from
 the same scan results table above it; this only lays that data out as an
-image. Picks the top N (default 3) candidates by conviction_score among
-those passing every filter for whichever trading-style preset is active -
-the same selection rule the email report's top-7 CSV already uses, so the
-cards and that CSV always name the same stocks.
+image. Pick any count with the slider (up to 50) - ranked by
+conviction_score across **every stock scored for the active preset**,
+with no `passes_all_filters` requirement, so you can pull in borderline
+names and judge them yourself instead of only seeing whatever already
+cleared every technical filter. A card for a stock that didn't pass every
+filter is marked **"NOT ALL FILTERS PASSED"** in red next to its rank, so
+that's never hidden.
 
 Every card carries a date/time stamp and a fixed disclaimer ("Not
 financial advice... rule-based, algorithmic output... consult a
 SEBI-registered advisor") baked into the image itself, so it stays
 attached wherever the PNG gets forwarded. Download individual cards from
 the app, or check **Email report** below - it attaches today's top 3
-automatically. See `src/trade_card.py`.
+(same all-stocks ranking) automatically. See `src/trade_card.py`.
 
 ## False-Move Filter (beta)
 
