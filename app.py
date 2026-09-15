@@ -32,6 +32,7 @@ from src.fundamentals import annotate_with_fundamentals
 from src.growth_screen import annotate_with_growth_screen
 from src.breakout_radar import aggregate_historical_hit_rate, scan_breakout_radar
 from src.gann_panel import scan_gann_panel
+from src.btst_check import aggregate_btst_hit_rate
 from src.false_move_filter import annotate_with_false_move_check
 from src.trade_card import generate_daily_trade_cards, image_to_png_bytes
 from src import sector_themes as themes
@@ -1182,6 +1183,60 @@ else:
                 "Download full Gann panel detail as CSV",
                 gann_df.to_csv(index=False),
                 file_name="gann_panel.csv",
+            )
+
+
+# ---------------------------------------------------------------------------
+# BTST historical check - answers "would a specific BTST setup actually
+# have worked" against this app's own price history, honestly. Not a
+# signal generator - a measurement tool.
+# ---------------------------------------------------------------------------
+st.divider()
+st.header("BTST Historical Check")
+st.caption(
+    "Tests ONE precisely-defined setup - strong close (closing repeatedly near the day's high) + "
+    "volume confirmation + a non-conflicting completed weekly RSI - against this app's own fetched "
+    "price history, one day forward (bought at today's close, sold tomorrow), matching what a BTST "
+    "trade actually is. This reports whatever the real hit rate and average return turn out to be, "
+    "compared against an unflagged baseline - it does NOT claim any accuracy target. Read `n_flagged` "
+    "before trusting any percentage next to it: a headline rate from a handful of occurrences isn't "
+    "evidence of an edge. See `config/scanner_config.yaml`'s `filters.btst_check` block to change the "
+    "setup's thresholds."
+)
+
+if "enriched_cache" not in st.session_state or not st.session_state.enriched_cache:
+    st.info("Run a scan above first - this check reuses that price data instead of a separate fetch.")
+else:
+    if st.button("📊 Run BTST historical check"):
+        with st.spinner(f"Checking {len(st.session_state.enriched_cache)} stocks' history for this setup..."):
+            st.session_state.btst_result = aggregate_btst_hit_rate(st.session_state.enriched_cache, cfg)
+
+    if "btst_result" in st.session_state:
+        r = st.session_state.btst_result
+        if not r["n_flagged"]:
+            st.warning(
+                f"No historical occurrences of this setup found across {r['n_stocks_included']} stocks with "
+                "enough history - too small (zero) a sample to say anything. Try loosening the thresholds "
+                "in scanner_config.yaml."
+            )
+        else:
+            b1, b2, b3 = st.columns(3)
+            b1.metric("Stocks included", r["n_stocks_included"])
+            b2.metric("Times flagged", r["n_flagged"])
+            b3.metric(
+                f"Reached +{r['target_return_pct']:.1f}% next-day high",
+                f"{r['hit_target_rate_pct']}%",
+                help="Best case - as if sold at tomorrow's intraday high, not a realistic fixed-time exit.",
+            )
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Avg next-day close return", f"{r['avg_next_close_return_pct']}%")
+            c2.metric("% of days closed positive", f"{r['pct_days_positive']}%")
+            c3.metric(f"Hit -{r['stop_loss_pct']:.1f}% next-day low", f"{r['hit_stop_rate_pct']}%")
+            st.caption(
+                f"Baseline (unflagged days) for comparison: {r['baseline_hit_target_rate_pct']}% reached the "
+                f"same target, average next-day close return {r['avg_baseline_next_close_return_pct']}%, "
+                f"across {r['n_baseline']} days. If the flagged numbers aren't meaningfully better than "
+                "baseline, this setup isn't adding anything - just what happened to show up in this history."
             )
 
 

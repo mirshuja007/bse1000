@@ -401,6 +401,42 @@ without lookahead bias) remains a separate, bigger project - see Roadmap.
 
 See `src/breakout_radar.py`.
 
+## BTST Historical Check
+
+A measurement tool, not a signal generator - answers "would a specific
+BTST (Buy Today Sell Tomorrow) setup actually have worked" against this
+app's own fetched price history, honestly, rather than promising an
+accuracy number up front.
+
+The setup tested: a **strong close** (`close_strength` at or above
+`min_close_strength` - the stock has been closing repeatedly near its
+day's high, not near the low) + **volume confirmation**
+(`volume_surge` at or above `min_volume_surge`) + a **non-conflicting
+completed weekly RSI** (the most recently COMPLETED week's RSI - never the
+current, still-forming week, to avoid lookahead - at or above
+`min_weekly_rsi`). All three reuse indicators the main scan already
+computes; nothing new is fetched.
+
+It's a genuine one-day-forward test, matching what a BTST trade actually
+is: bought at today's close, exited tomorrow. Two different numbers are
+reported because they answer different questions - `hit_target_rate_pct`
+(how often tomorrow's HIGH reached the target - the best case, as if you
+sold at the exact intraday peak) versus `avg_next_close_return_pct` /
+`pct_days_positive` (what you'd have realized selling at tomorrow's close
+instead - a much more honest number). A downside number
+(`hit_stop_rate_pct`, how often tomorrow's low breached a stop) is shown
+alongside so the target-hit number alone can't tell a one-sided story.
+Every rate is compared against a baseline (unflagged days), and
+`n_flagged` is always shown first - the same "small sample" discipline as
+Breakout Radar's hit-rate check.
+
+**This does not, and will not, claim any specific accuracy target.** If
+you tune the thresholds and the honest result comes back at 55% with a
+mediocre average return, that's what gets reported - the point is finding
+out, not confirming a number you wanted going in. See
+`src/btst_check.py` and the `filters.btst_check` block in
+`config/scanner_config.yaml`.
+
 ## Gann Price-Time Panel (experimental)
 
 A separate, experimental watchlist panel (below Breakout Radar), based on

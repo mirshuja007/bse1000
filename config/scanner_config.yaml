@@ -155,6 +155,20 @@ filters:
     rsi_bullish_min: 60        # RSI zone boundaries (matches the source material's weekly/daily "Direction" matrix: 60+/40-60/<40)
     rsi_bearish_max: 40
 
+  # BTST (Buy Today Sell Tomorrow) historical check - see src/btst_check.py.
+  # This does NOT claim any accuracy target; it MEASURES one precisely
+  # defined setup (strong close + volume confirmation + a non-conflicting
+  # weekly RSI) against this app's own already-fetched price history and
+  # reports whatever the real hit rate/return turns out to be, honestly,
+  # against an unflagged baseline. A one-day-forward test, matching what a
+  # BTST trade actually is (bought at today's close, exited tomorrow).
+  btst_check:
+    min_close_strength: 0.7     # 0-1: (close-low)/(high-low) averaged over 3 days - must be closing consistently in the top 30% of its range
+    min_volume_surge: 1.5       # today's volume vs its own 20-day average
+    min_weekly_rsi: 55.0        # last COMPLETED week's RSI (never the current, still-forming week) must be at or above this
+    target_return_pct: 4.5      # "hit" = tomorrow's high reaches this % above today's close (best-case, sold intraday)
+    stop_loss_pct: 2.0          # for downside reporting: tomorrow's low falls this % below today's close
+
 # ---------------------------------------------------------------------------
 # Conviction scoring - weighted, transparent, fully rule-based (no black-box
 # ML claims). Category weights must sum to 100. Each category score is 0-100
