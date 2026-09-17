@@ -111,6 +111,14 @@ def test_build_portfolio_counts_distinct_sectors():
     assert portfolio["n_sectors"] == 2
 
 
+def test_build_portfolio_beta_is_exact_average_under_equal_weighting():
+    rows = [make_row("A", score=90.0, beta=0.8), make_row("B", score=80.0, beta=1.2)]
+    result_df = pd.DataFrame(rows)
+    portfolio = pm.build_portfolio(result_df, portfolio_size=25)
+    assert portfolio["metrics"]["portfolio_beta"]["value"] == 1.0
+    assert portfolio["metrics"]["portfolio_beta"]["n_with_data"] == 2
+
+
 def test_build_portfolio_handles_zero_qualifying_stocks():
     rows = [make_row("A", score=90.0, passes_all=False)]
     result_df = pd.DataFrame(rows)

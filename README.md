@@ -222,11 +222,13 @@ Note also: ROCE isn't available from yfinance, so ROE stands in for it.
 A **separate** second-pass filter from the one above, **on by default**,
 kept apart so it can be refined independently: the "20/40 rule" (20%+ YoY
 sales growth, 40%+ YoY PAT growth, both latest-fiscal-year-vs-prior), low
-price volatility ("low standard deviation"), and PEG < 1. Toggle it under
-**Growth & Quality screen (beta)** in the sidebar - since it fetches from
-yfinance for every candidate that already passed the technical filters,
-expect scans to take longer (one extra web request per candidate) than
-with it switched off.
+price volatility ("low standard deviation"), a **beta target range**
+(default 0.8-1.2 - close enough to the market to participate in upside,
+not so high it's excessively fragile in a correction), and PEG < 1.
+Toggle it under **Growth & Quality screen (beta)** in the sidebar - since
+it fetches from yfinance for every candidate that already passed the
+technical filters, expect scans to take longer (one extra web request per
+candidate) than with it switched off.
 
 Three different data sources feed this, with three different trust levels:
 
@@ -238,11 +240,14 @@ Three different data sources feed this, with three different trust levels:
    text, not a live response. Run
    `python debug_growth_financials.py <SYMBOL> <SYMBOL> ...` on a machine
    with real internet before trusting this.
-2. **Price volatility ("low SD")** - annualized standard deviation of daily
-   returns, computed from the OHLCV data this app already pulled from Kite
-   for the technical scan. This is the one metric here that's **fully
-   verified** - not a new data source, the same trusted price data every
-   indicator in this app already uses.
+2. **Price volatility ("low SD") and Beta** - annualized standard
+   deviation of daily returns, and Beta (Cov(stock, benchmark) /
+   Var(benchmark), the standard definition), both computed from the OHLCV
+   and benchmark data this app already pulled from Kite for the technical
+   scan. These are the metrics here that are **fully verified** - not a
+   new data source, the same trusted price data every indicator in this
+   app already uses. Beta is `None` when the main scan didn't fetch a
+   benchmark for that stock.
 3. **PEG** - computed here as trailing P/E ÷ PAT growth %, deliberately
    *not* Yahoo's own `pegRatio` field (which has its own unverified
    coverage) - reusing numbers already fetched keeps it transparent and
@@ -251,23 +256,30 @@ Three different data sources feed this, with three different trust levels:
 
 Same missing-data philosophy as the Fundamentals filter: a stock with a
 metric Yahoo doesn't have is flagged `growth_screen_note: "Unverified
-(missing: ...)"`, never silently excluded, unless **Require all 4 metrics
+(missing: ...)"`, never silently excluded, unless **Require all 5 metrics
 available** is turned on. Only fetches for stocks that already passed
 every technical filter, and never feeds into the conviction score.
 
-**Futuristic-sector theme filter** ("Principle 5" from your slide - Data
+**Futuristic-sector theme filter** ("Principle 5" from your slides - Data
 Centre/AI/Semiconductors, IT Enabled Services & Telecom, Healthcare,
-Digital Financial Services, Green Energy, EMS, Defence Industry): a
-**manually-curated list**, not an automatic classifier - NSE's own sector
-field is too coarse to map onto these themes cleanly (e.g. "Power" mixes
-green energy with coal-fired thermal plants, "Capital Goods" spans
-defence, EMS, and general industrials, so an automatic mapping would
-misclassify a meaningful number of stocks). `data/sector_theme_map.csv` is
-tracked in the repo (curated reference data, like the constituent lists -
-not personal output) and ships with **zero rows tagged** - every stock
-shows `theme: "Unclassified"` until you tell me which symbols belong to
-which theme and I add rows. Enable **Restrict to selected theme(s)** in
-the sidebar once some stocks are tagged. See `src/sector_themes.py`.
+Digital Financial Services, Green Energy, New-Age Consumer, EMS, Defence
+Industry - 8 sectors, matching "8 sectors & 20 sub-sectors" from the
+Portfolio Metrics slide): a **manually-curated list**, not an automatic
+classifier - NSE's own sector field is too coarse to map onto these
+themes cleanly (e.g. "Power" mixes green energy with coal-fired thermal
+plants, "Capital Goods" spans defence, EMS, and general industrials, so
+an automatic mapping would misclassify a meaningful number of stocks).
+Per the source material's own principle: "structural tailwinds qualify
+the sector; stock selection still depends on growth, PEG and risk
+filters" - this is a qualifying filter layered on top of Growth & Quality
+above, never a replacement for it. `data/sector_theme_map.csv` is tracked
+in the repo (curated reference data, like the constituent lists - not
+personal output) and ships with **zero rows tagged** - every stock shows
+`theme: "Unclassified"` until you tell me which symbols belong to which
+theme and I add rows. Enable **Restrict to selected theme(s)** in the
+sidebar once some stocks are tagged. See `src/sector_themes.py` for the
+full sub-theme detail (e.g. Green Energy = solar/transformers/smart
+meters/wind/nuclear/EV/copper/aluminium) kept there for reference.
 
 ## Tracking past recommendations
 
@@ -343,8 +355,16 @@ active screen.
 Shown: average sales/PAT growth, average PEG and trailing P/E, average
 market cap and daily turnover (each with `n_with_data` so a partial
 average - e.g. only 6 of 25 holdings, because Fundamentals was off - is
-never mistaken for a full-portfolio figure), sector count, and a suggested
-quarterly review cadence.
+never mistaken for a full-portfolio figure), sector count, **Portfolio
+Beta**, and a suggested quarterly review cadence.
+
+Portfolio Beta is the simple average of holdings' individual betas - and
+under **equal weighting this is an exact portfolio statistic, not an
+approximation** (beta is linear in portfolio weights regardless of
+correlation between holdings). This is the one risk stat from Principle 4
+("Keep Volatility and Beta Under Control", target range 0.8-1.2) that's
+cheap and honest to compute today, unlike portfolio-level Standard
+Deviation below.
 
 **Two things this does NOT do yet, on purpose:**
 - **No locked membership.** Every "Build portfolio" click re-selects
@@ -352,12 +372,14 @@ quarterly review cadence.
   are this quarter's N stocks" and hold them steady until the next review
   date. `next_review_date` is a suggested cadence to re-run this, not an
   enforced rebalance lock.
-- **No Sharpe/Beta/Treynor/Standard Deviation.** Those need a genuine
-  portfolio-level historical backtest (years of monthly returns per
-  holding, a benchmark series, a risk-free rate) and carry a real
-  survivorship-bias caveat (today's 25 winners weren't necessarily in the
-  portfolio years ago) - flagged as a separate, bigger follow-up rather
-  than shipped half-honestly.
+- **No Sharpe/Treynor/portfolio-level Standard Deviation.** Unlike Beta,
+  these can't be built from a simple average - real portfolio SD needs
+  the full covariance matrix between holdings (diversification typically
+  makes it lower than any simple average), and Sharpe/Treynor need a
+  multi-year simulated portfolio return series plus a risk-free rate, all
+  carrying a genuine survivorship-bias caveat (today's 25 winners weren't
+  necessarily in the portfolio years ago) - flagged as a separate, bigger
+  follow-up rather than shipped half-honestly.
 
 See `src/portfolio_metrics.py`.
 

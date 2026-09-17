@@ -12,6 +12,32 @@ constituent lists, it's curated reference data, not personal runtime
 output. It ships with just the schema and zero rows: no stock has been
 tagged to a theme yet. Tell me which stocks belong to which theme and
 I'll add rows.
+
+Per the source material's own stated principle: "structural tailwinds
+qualify the sector; stock selection still depends on growth, PEG and risk
+filters" - this theme tag is a QUALIFYING filter, never a replacement for
+the Growth & Quality / Fundamentals screens. Enabling a theme restriction
+narrows the candidate pool; it doesn't relax any other check.
+
+The 8 sectors below (matching "8 sectors & 20 sub-sectors" from the
+Portfolio Metrics slide) with their known sub-themes, for reference when
+tagging stocks - the sub-theme detail below is NOT a separate filterable
+column yet, just documentation of the taxonomy this list was built from:
+
+- Data Centre / AI / Semiconductors: data centres, AI, semiconductors,
+  cloud, cybersecurity
+- IT Enabled Services & Telecom: e-commerce, drones/eVTOLs, streaming,
+  digital ads, optical fiber
+- Healthcare: CDMO, obesity, antibiotics, cancer, biotechnology, robotic
+  surgery
+- Digital Financial Services: exchanges, asset management, stock broking
+  & allied, digital lending/payments/wealth platforms
+- Green Energy: solar, transformers/T&D, smart meters, wind, nuclear, EV,
+  copper, aluminium
+- New-Age Consumer: value fashion retail, tech-enabled omnichannel
+  eyewear, digital beauty/lifestyle commerce, quick commerce
+- Electronic Manufacturing Services (EMS): PCB, mobile manufacturing, RFID
+- Defence Industry: anti-drone, space
 """
 from __future__ import annotations
 
@@ -27,6 +53,7 @@ THEMES = [
     "Healthcare",
     "Digital Financial Services",
     "Green Energy",
+    "New-Age Consumer",
     "Electronic Manufacturing Services (EMS)",
     "Defence Industry",
 ]

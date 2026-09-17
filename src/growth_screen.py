@@ -1,7 +1,8 @@
 """Growth & Quality screen: 20%+ YoY sales growth, 40%+ YoY PAT growth (the
-"20/40 rule"), low price volatility, and PEG < 1 - a separate, evolving
-panel from the market-cap/EBITDA/ROE/D-E "Fundamentals filter", per your
-request to keep this one apart so it can be refined independently.
+"20/40 rule"), low price volatility, beta between a target range, and
+PEG < 1 - a separate, evolving panel from the market-cap/EBITDA/ROE/D-E
+"Fundamentals filter", per your request to keep this one apart so it can
+be refined independently.
 
 Data sources, and what's actually verified vs assumed
 -------------------------------------------------------
@@ -12,11 +13,13 @@ Data sources, and what's actually verified vs assumed
   own deprecation warning to index "Net Income"; "Total Revenue" the same
   way), not a live response. Run `debug_growth_financials.py` on a machine
   with real internet before trusting this.
-- **Volatility ("low standard deviation")**: computed from the OHLCV data
-  this app already pulled from Kite for the technical scan - NOT a new
-  data source, so unlike the yfinance-derived numbers above, this one is
-  fully verified (it's the same trusted data every indicator in this app
-  already relies on).
+- **Volatility ("low standard deviation") and Beta**: both computed from
+  the OHLCV (and benchmark) data this app already pulled from Kite for
+  the technical scan - NOT a new data source, so unlike the
+  yfinance-derived numbers above, these are fully verified (the same
+  trusted data every indicator in this app already relies on). Beta is
+  None when the main scan didn't fetch a benchmark for this stock, or
+  there isn't enough overlapping history - never guessed at.
 - **PEG**: computed here as trailing P/E ÷ PAT growth %, not Yahoo's own
   `pegRatio`/`trailingPegRatio` field - that field has its own unverified
   coverage, and computing it ourselves from numbers we already fetch (and
@@ -103,6 +106,28 @@ def compute_price_volatility(enriched_df: pd.DataFrame | None, lookback_days: in
     return round(float(annualized_pct), 1)
 
 
+def compute_beta(enriched_df: pd.DataFrame | None, lookback_days: int = 252) -> float | None:
+    """Beta = Cov(stock daily returns, benchmark daily returns) / Var(benchmark
+    daily returns) - the standard definition, computed from data already
+    fetched for the technical scan (`close` + `bench_close`, merged in by
+    src/indicators.py's compute_indicators() when a benchmark was supplied).
+    None when no benchmark was fetched for this stock (the `bench_close`
+    column won't exist at all in that case) or there isn't enough
+    overlapping history - never guessed at."""
+    if enriched_df is None or "bench_close" not in enriched_df.columns or len(enriched_df) < 20:
+        return None
+    tail = enriched_df[["close", "bench_close"]].tail(lookback_days).dropna()
+    if len(tail) < 20:
+        return None
+    returns = pd.DataFrame({"stock": tail["close"].pct_change(), "bench": tail["bench_close"].pct_change()}).dropna()
+    if len(returns) < 10:
+        return None
+    variance = returns["bench"].var()
+    if not variance or pd.isna(variance):
+        return None
+    return round(float(returns["stock"].cov(returns["bench"]) / variance), 2)
+
+
 def compute_peg(trailing_pe: float | None, pat_growth_pct: float | None) -> float | None:
     """PEG = trailing P/E / PAT growth %, both already-fetched numbers -
     not Yahoo's own PEG field. Undefined (None) when P/E or growth is
@@ -130,6 +155,9 @@ def evaluate_growth_screen(metrics: dict, config: dict) -> dict:
             None
             if metrics["annualized_volatility_pct"] is None
             else metrics["annualized_volatility_pct"] <= g["max_annualized_volatility_pct"]
+        ),
+        "beta_ok": (
+            None if metrics["beta"] is None else g["min_beta"] <= metrics["beta"] <= g["max_beta"]
         ),
         "peg_ok": (None if metrics["peg"] is None else metrics["peg"] <= g["max_peg"]),
     }
@@ -182,6 +210,7 @@ def fetch_and_evaluate_growth(
         **growth,
         "trailing_pe": trailing_pe,
         "annualized_volatility_pct": compute_price_volatility(enriched_df),
+        "beta": compute_beta(enriched_df),
     }
     metrics["peg"] = compute_peg(metrics["trailing_pe"], metrics["pat_growth_pct"])
 
@@ -199,8 +228,8 @@ def annotate_with_growth_screen(result_df: pd.DataFrame, config: dict, enriched_
     only evaluates candidates that already passed every technical filter."""
     out = result_df.copy()
     growth_cols = [
-        "sales_growth_pct", "pat_growth_pct", "trailing_pe", "annualized_volatility_pct", "peg",
-        "sales_growth_ok", "pat_growth_ok", "volatility_ok", "peg_ok",
+        "sales_growth_pct", "pat_growth_pct", "trailing_pe", "annualized_volatility_pct", "beta", "peg",
+        "sales_growth_ok", "pat_growth_ok", "volatility_ok", "beta_ok", "peg_ok",
         "data_complete", "passes_growth_screen", "growth_screen_note",
     ]
     for col in growth_cols:

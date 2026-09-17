@@ -36,13 +36,14 @@ def test_themes_for_all_unclassified_when_map_is_empty(tmp_path, monkeypatch):
     assert list(tags) == ["Unclassified", "Unclassified"]
 
 
-def test_themes_constant_matches_the_seven_principle_5_categories():
+def test_themes_constant_matches_the_eight_categories():
     assert st.THEMES == [
         "Data Centre / AI / Semiconductors",
         "IT Enabled Services & Telecom",
         "Healthcare",
         "Digital Financial Services",
         "Green Energy",
+        "New-Age Consumer",
         "Electronic Manufacturing Services (EMS)",
         "Defence Industry",
     ]

@@ -498,11 +498,21 @@ def sidebar_controls(cfg: dict) -> dict:
             "Max annualized price volatility (%) - \"low SD\"", 5, 100,
             int(cfg["filters"]["growth_quality"]["max_annualized_volatility_pct"]),
         )
+        beta_min, beta_max = st.sidebar.slider(
+            "Beta target range - close to market, not excessively fragile", 0.0, 3.0,
+            (
+                float(cfg["filters"]["growth_quality"]["min_beta"]),
+                float(cfg["filters"]["growth_quality"]["max_beta"]),
+            ),
+            0.1,
+        )
+        cfg["filters"]["growth_quality"]["min_beta"] = beta_min
+        cfg["filters"]["growth_quality"]["max_beta"] = beta_max
         cfg["filters"]["growth_quality"]["max_peg"] = st.sidebar.slider(
             "Max PEG", 0.1, 5.0, float(cfg["filters"]["growth_quality"]["max_peg"]), 0.1
         )
         cfg["filters"]["growth_quality"]["require_complete_data"] = st.sidebar.checkbox(
-            "Require all 4 metrics available (reject unverified data instead of flagging it)",
+            "Require all 5 metrics available (reject unverified data instead of flagging it)",
             cfg["filters"]["growth_quality"]["require_complete_data"],
             key="growth_require_complete",
         )
@@ -799,7 +809,7 @@ if "result_df" in st.session_state:
             display_cols += ["theme"]
         if growth_checked:
             display_cols += [
-                "sales_growth_pct", "pat_growth_pct", "annualized_volatility_pct", "peg",
+                "sales_growth_pct", "pat_growth_pct", "annualized_volatility_pct", "beta", "peg",
                 "passes_growth_screen", "growth_screen_note",
             ]
         if false_move_checked:
@@ -992,10 +1002,15 @@ else:
             r2c2.metric("Avg market cap", _metric_label("avg_market_cap_cr", " Cr"))
             r2c3.metric("Avg daily turnover", _metric_label("avg_turnover_cr", " Cr"))
 
-            r3c1, r3c2, r3c3 = st.columns(3)
+            r3c1, r3c2, r3c3, r3c4 = st.columns(4)
             r3c1.metric("Holdings", f"{p['n_holdings']} @ {100 / p['n_holdings']:.1f}% each")
             r3c2.metric("Sectors represented", p["n_sectors"] if p["n_sectors"] is not None else "n/a")
             r3c3.metric("Review frequency", p["review_frequency"])
+            r3c4.metric(
+                "Portfolio beta",
+                _metric_label("portfolio_beta"),
+                help="Exact under equal weighting (beta is linear in weights) - not an approximation.",
+            )
             st.caption(
                 f"Last built: {p['last_review_date']} - suggested next review: {p['next_review_date']}"
             )
@@ -1005,7 +1020,7 @@ else:
                 for c in [
                     "company_name", "tradingsymbol", "exchange", "sector", "theme", "weight_pct",
                     "conviction_score", "conviction_tier", "sales_growth_pct", "pat_growth_pct", "peg",
-                    "trailing_pe", "market_cap_cr", "turnover_cr",
+                    "trailing_pe", "market_cap_cr", "turnover_cr", "beta",
                 ]
                 if c in p["holdings"].columns
             ]

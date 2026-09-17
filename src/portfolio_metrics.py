@@ -32,6 +32,17 @@ Averages are computed only over holdings with a non-missing value for
 that metric - `n_with_data` is reported alongside every average so a mean
 over, say, 6 of 25 holdings (because Fundamentals wasn't enabled for this
 scan) is never mistaken for a mean over the full portfolio.
+
+`portfolio_beta` (average of holdings' own per-stock betas, from
+src/growth_screen.py's compute_beta) IS an exact, real portfolio
+statistic under equal weighting - beta is linear in weights regardless of
+correlation structure between holdings. Portfolio-level Standard
+Deviation and Sharpe/Treynor ratios are NOT included, and can't be built
+this cheaply: real portfolio SD needs the full covariance matrix between
+holdings (diversification typically makes it lower than any simple
+average), and Sharpe/Treynor need a multi-year simulated portfolio return
+series plus a risk-free rate - both a separate, bigger follow-up with a
+genuine survivorship-bias caveat (see README).
 """
 from __future__ import annotations
 
@@ -75,6 +86,16 @@ def build_portfolio(result_df: pd.DataFrame, portfolio_size: int = 25) -> dict:
         "avg_trailing_pe": _avg(holdings, "trailing_pe"),
         "avg_market_cap_cr": _avg(holdings, "market_cap_cr"),
         "avg_turnover_cr": _avg(holdings, "turnover_cr"),
+        # Under EQUAL weighting, portfolio beta is exactly the average of
+        # constituent betas (beta is linear in weights) - this is a true
+        # portfolio statistic, not an approximation. Average volatility,
+        # by contrast, is NOT portfolio volatility (diversification/
+        # correlation effects mean real portfolio SD is typically lower
+        # than the simple average) - deliberately not computed here to
+        # avoid implying it's the same thing. A true portfolio SD needs
+        # the full covariance matrix - see the Sharpe/Beta/Treynor
+        # follow-up noted in the module docstring.
+        "portfolio_beta": _avg(holdings, "beta"),
     }
     n_sectors = int(holdings["sector"].nunique()) if "sector" in holdings.columns and n else None
 

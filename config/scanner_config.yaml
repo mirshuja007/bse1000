@@ -90,19 +90,21 @@ filters:
     require_complete_data: false    # if true, a stock with ANY missing metric fails instead of being flagged unverified
 
   # Growth & Quality screen (the "20/40 rule": sales growth, PAT growth,
-  # low price volatility, PEG) plus an optional futuristic-sector theme
-  # filter - a SEPARATE, evolving panel from `fundamentals` above (kept
-  # apart per request, to refine independently). See src/growth_screen.py
-  # for the unverified-yfinance-field caveats (same as `fundamentals`,
-  # except annualized_volatility which is computed from this app's own
-  # already-fetched price data, not yfinance). Off by default; applied as
-  # a second pass to candidates that already passed every technical
-  # filter; never part of the conviction score.
+  # low price volatility, beta target range, PEG) plus an optional
+  # futuristic-sector theme filter - a SEPARATE, evolving panel from
+  # `fundamentals` above (kept apart per request, to refine independently).
+  # See src/growth_screen.py for the unverified-yfinance-field caveats
+  # (same as `fundamentals`, except annualized_volatility and beta, both
+  # computed from this app's own already-fetched price/benchmark data, not
+  # yfinance). On by default; applied as a second pass to candidates that
+  # already passed every technical filter; never part of the conviction score.
   growth_quality:
     enabled: true
     sales_growth_min_pct: 20        # YoY revenue growth % floor, latest fiscal year vs prior
     pat_growth_min_pct: 40          # YoY net income (PAT) growth % floor, latest fiscal year vs prior
     max_annualized_volatility_pct: 35   # "low standard deviation" = annualized SD of daily returns, ceiling
+    min_beta: 0.8                   # beta target range floor - close enough to the market to participate in upside
+    max_beta: 1.2                   # ...ceiling - but not so high the stock is excessively fragile in a correction
     max_peg: 1.0                    # trailing P/E / PAT growth %, ceiling
     require_complete_data: false    # if true, a stock with ANY missing metric fails instead of being flagged unverified
     theme_filter_enabled: false     # restrict to futuristic-sector themes (see src/sector_themes.py)

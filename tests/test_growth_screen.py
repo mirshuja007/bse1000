@@ -72,6 +72,38 @@ def test_compute_price_volatility_none_with_no_data():
     assert gs.compute_price_volatility(None) is None
 
 
+def test_compute_beta_is_one_when_stock_moves_identically_to_benchmark():
+    rng = np.random.default_rng(0)
+    bench_closes = 100 + np.cumsum(rng.normal(0, 1, 300))
+    df = pd.DataFrame({"close": bench_closes, "bench_close": bench_closes})
+    beta = gs.compute_beta(df)
+    assert beta == pytest.approx(1.0, abs=0.01)
+
+
+def test_compute_beta_is_two_when_stock_moves_twice_the_benchmark():
+    rng = np.random.default_rng(1)
+    bench_returns = rng.normal(0, 0.01, 300)
+    bench_closes = 100 * np.cumprod(1 + bench_returns)
+    stock_closes = 100 * np.cumprod(1 + 2 * bench_returns)  # exactly 2x the benchmark's daily return
+    df = pd.DataFrame({"close": stock_closes, "bench_close": bench_closes})
+    beta = gs.compute_beta(df)
+    assert beta == pytest.approx(2.0, abs=0.01)
+
+
+def test_compute_beta_none_when_no_benchmark_column():
+    df = pd.DataFrame({"close": np.linspace(100, 110, 300)})
+    assert gs.compute_beta(df) is None
+
+
+def test_compute_beta_none_with_insufficient_history():
+    df = pd.DataFrame({"close": [100.0, 101.0, 102.0], "bench_close": [200.0, 201.0, 202.0]})
+    assert gs.compute_beta(df) is None
+
+
+def test_compute_beta_none_with_no_data():
+    assert gs.compute_beta(None) is None
+
+
 def test_compute_peg_basic():
     assert gs.compute_peg(trailing_pe=30.0, pat_growth_pct=40.0) == 0.75
 
@@ -93,12 +125,15 @@ def _cfg(**overrides):
 
 
 def _metrics(**overrides):
-    m = {"sales_growth_pct": 25.0, "pat_growth_pct": 45.0, "annualized_volatility_pct": 20.0, "peg": 0.6}
+    m = {
+        "sales_growth_pct": 25.0, "pat_growth_pct": 45.0, "annualized_volatility_pct": 20.0,
+        "beta": 1.0, "peg": 0.6,
+    }
     m.update(overrides)
     return m
 
 
-def test_evaluate_growth_screen_passes_when_all_four_criteria_met():
+def test_evaluate_growth_screen_passes_when_all_five_criteria_met():
     result = gs.evaluate_growth_screen(_metrics(), _cfg())
     assert result["passes_growth_screen"] is True
     assert result["data_complete"] is True
@@ -115,6 +150,20 @@ def test_evaluate_growth_screen_fails_on_high_volatility():
     result = gs.evaluate_growth_screen(_metrics(annualized_volatility_pct=60.0), _cfg())
     assert result["volatility_ok"] is False
     assert result["passes_growth_screen"] is False
+
+
+def test_evaluate_growth_screen_fails_when_beta_outside_target_range():
+    result = gs.evaluate_growth_screen(_metrics(beta=1.8), _cfg())
+    assert result["beta_ok"] is False
+    assert result["passes_growth_screen"] is False
+
+    result_low = gs.evaluate_growth_screen(_metrics(beta=0.3), _cfg())
+    assert result_low["beta_ok"] is False
+
+
+def test_evaluate_growth_screen_passes_at_beta_range_boundaries():
+    assert gs.evaluate_growth_screen(_metrics(beta=0.8), _cfg())["beta_ok"] is True
+    assert gs.evaluate_growth_screen(_metrics(beta=1.2), _cfg())["beta_ok"] is True
 
 
 def test_evaluate_growth_screen_fails_on_peg_too_high():
@@ -137,7 +186,10 @@ def test_evaluate_growth_screen_require_complete_data_fails_on_any_missing_metri
 
 
 def test_evaluate_growth_screen_all_missing_never_passes():
-    metrics = {"sales_growth_pct": None, "pat_growth_pct": None, "annualized_volatility_pct": None, "peg": None}
+    metrics = {
+        "sales_growth_pct": None, "pat_growth_pct": None, "annualized_volatility_pct": None,
+        "beta": None, "peg": None,
+    }
     result = gs.evaluate_growth_screen(metrics, _cfg())
     assert result["passes_growth_screen"] is False
 
@@ -149,8 +201,9 @@ def test_annotate_with_growth_screen_only_evaluates_passing_candidates(monkeypat
         calls.append(tradingsymbol)
         return {
             "sales_growth_pct": 25.0, "pat_growth_pct": 45.0, "trailing_pe": 20.0,
-            "annualized_volatility_pct": 15.0, "peg": 0.5,
-            "sales_growth_ok": True, "pat_growth_ok": True, "volatility_ok": True, "peg_ok": True,
+            "annualized_volatility_pct": 15.0, "beta": 1.0, "peg": 0.5,
+            "sales_growth_ok": True, "pat_growth_ok": True, "volatility_ok": True,
+            "beta_ok": True, "peg_ok": True,
             "data_complete": True, "passes_growth_screen": True, "growth_screen_note": "",
         }
 
