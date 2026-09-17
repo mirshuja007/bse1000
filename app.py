@@ -33,6 +33,7 @@ from src.growth_screen import annotate_with_growth_screen
 from src.breakout_radar import aggregate_historical_hit_rate, scan_breakout_radar
 from src.gann_panel import scan_gann_panel
 from src.btst_check import aggregate_btst_hit_rate
+from src.portfolio_metrics import build_portfolio
 from src.false_move_filter import annotate_with_false_move_check
 from src.trade_card import generate_daily_trade_cards, image_to_png_bytes
 from src import sector_themes as themes
@@ -934,6 +935,86 @@ else:
         "Nifty Total Market resolves by exact NSE symbol match; only the BSE 1000 mapping needs a "
         "match_confidence review, since it relies on fuzzy name matching."
     )
+
+
+# ---------------------------------------------------------------------------
+# Portfolio Metrics - carves a concentrated, equal-weighted N-stock
+# portfolio out of the scan results (stocks that already pass every
+# ENABLED screen), plus a summary dashboard of its growth/valuation/
+# liquidity attributes. Does NOT lock membership between reviews yet -
+# see src/portfolio_metrics.py.
+# ---------------------------------------------------------------------------
+st.divider()
+st.header("Portfolio Metrics")
+st.caption(
+    "Start broad, then build a focused portfolio: the top N candidates by conviction score among "
+    "stocks that already pass every currently-ENABLED screen (base technical filters, Growth & Quality "
+    "if on, Fundamentals if on) - equal-weighted. If fewer than N stocks pass, the portfolio is simply "
+    "smaller, never padded to hit the count. **Membership isn't locked between runs yet** - "
+    "`next_review_date` is a suggested cadence to re-run this, not an enforced rebalance lock; a real "
+    "locked-membership quarterly rebalance would be a separate follow-up. Risk-adjusted return stats "
+    "(Sharpe/Beta/Treynor) aren't included yet either - those need a portfolio-level historical "
+    "backtest, a bigger separate piece flagged for later."
+)
+
+if "result_df" not in st.session_state or st.session_state.result_df.empty:
+    st.info("Run a scan above first - the portfolio is carved from that scan's results.")
+else:
+    portfolio_size = st.number_input("Portfolio size (equal-weighted)", min_value=1, max_value=100, value=25)
+    if st.button("📐 Build portfolio"):
+        st.session_state.portfolio = build_portfolio(st.session_state.result_df, portfolio_size=int(portfolio_size))
+
+    if "portfolio" in st.session_state:
+        p = st.session_state.portfolio
+        if p["n_holdings"] == 0:
+            st.warning("No stocks currently pass every enabled screen - nothing to build a portfolio from.")
+        else:
+            if p["n_holdings"] < p["requested_size"]:
+                st.warning(
+                    f"Only {p['n_holdings']} of the requested {p['requested_size']} stocks pass every "
+                    "enabled screen right now - the portfolio is smaller rather than padded."
+                )
+            m = p["metrics"]
+
+            def _metric_label(key: str, suffix: str = "") -> str:
+                d = m[key]
+                if d["value"] is None:
+                    return "n/a"
+                return f"{d['value']:.1f}{suffix} ({d['n_with_data']}/{p['n_holdings']} stocks)"
+
+            r1c1, r1c2, r1c3 = st.columns(3)
+            r1c1.metric("Avg sales growth TTM", _metric_label("avg_sales_growth_pct", "%"))
+            r1c2.metric("Avg PAT growth TTM", _metric_label("avg_pat_growth_pct", "%"))
+            r1c3.metric("Avg PEG", _metric_label("avg_peg"))
+
+            r2c1, r2c2, r2c3 = st.columns(3)
+            r2c1.metric("Avg trailing P/E", _metric_label("avg_trailing_pe"))
+            r2c2.metric("Avg market cap", _metric_label("avg_market_cap_cr", " Cr"))
+            r2c3.metric("Avg daily turnover", _metric_label("avg_turnover_cr", " Cr"))
+
+            r3c1, r3c2, r3c3 = st.columns(3)
+            r3c1.metric("Holdings", f"{p['n_holdings']} @ {100 / p['n_holdings']:.1f}% each")
+            r3c2.metric("Sectors represented", p["n_sectors"] if p["n_sectors"] is not None else "n/a")
+            r3c3.metric("Review frequency", p["review_frequency"])
+            st.caption(
+                f"Last built: {p['last_review_date']} - suggested next review: {p['next_review_date']}"
+            )
+
+            holdings_display_cols = [
+                c
+                for c in [
+                    "company_name", "tradingsymbol", "exchange", "sector", "theme", "weight_pct",
+                    "conviction_score", "conviction_tier", "sales_growth_pct", "pat_growth_pct", "peg",
+                    "trailing_pe", "market_cap_cr", "turnover_cr",
+                ]
+                if c in p["holdings"].columns
+            ]
+            st.dataframe(p["holdings"][holdings_display_cols], use_container_width=True, height=400)
+            st.download_button(
+                "Download portfolio holdings as CSV",
+                p["holdings"].to_csv(index=False),
+                file_name=f"portfolio_{p['n_holdings']}_holdings.csv",
+            )
 
 
 # ---------------------------------------------------------------------------

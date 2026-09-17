@@ -327,6 +327,40 @@ same local-file behavior as before, which is fine for local runs (your own
 machine's filesystem isn't wiped) but not for the public Streamlit Cloud
 deployment.
 
+## Portfolio Metrics
+
+Carves a concentrated, **equal-weighted N-stock portfolio** (default 25)
+out of the scan results - "start broad, then build a focused portfolio."
+The pool is stocks that already pass **every currently-ENABLED screen**
+(base technical filters, Growth & Quality if on, Fundamentals if on),
+ranked by conviction_score; if fewer than N pass, the portfolio is simply
+smaller, never padded to hit the count. This is deliberately different
+from Daily Trade Cards (which has no such requirement, by design, so it
+can surface borderline names for manual review) - this panel builds an
+actual candidate portfolio from names that have already cleared every
+active screen.
+
+Shown: average sales/PAT growth, average PEG and trailing P/E, average
+market cap and daily turnover (each with `n_with_data` so a partial
+average - e.g. only 6 of 25 holdings, because Fundamentals was off - is
+never mistaken for a full-portfolio figure), sector count, and a suggested
+quarterly review cadence.
+
+**Two things this does NOT do yet, on purpose:**
+- **No locked membership.** Every "Build portfolio" click re-selects
+  fresh top-N holdings from the current scan - it doesn't persist "these
+  are this quarter's N stocks" and hold them steady until the next review
+  date. `next_review_date` is a suggested cadence to re-run this, not an
+  enforced rebalance lock.
+- **No Sharpe/Beta/Treynor/Standard Deviation.** Those need a genuine
+  portfolio-level historical backtest (years of monthly returns per
+  holding, a benchmark series, a risk-free rate) and carry a real
+  survivorship-bias caveat (today's 25 winners weren't necessarily in the
+  portfolio years ago) - flagged as a separate, bigger follow-up rather
+  than shipped half-honestly.
+
+See `src/portfolio_metrics.py`.
+
 ## Emailing reports
 
 Click **📧 Email report** (bottom of the app) to email everything currently
