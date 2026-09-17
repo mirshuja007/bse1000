@@ -219,11 +219,14 @@ Note also: ROCE isn't available from yfinance, so ROE stands in for it.
 
 ## Growth & Quality screen (beta, unverified) + futuristic-sector themes
 
-A **separate** second-pass filter from the one above, off by default, kept
-apart so it can be refined independently: the "20/40 rule" (20%+ YoY sales
-growth, 40%+ YoY PAT growth, both latest-fiscal-year-vs-prior), low price
-volatility ("low standard deviation"), and PEG < 1. Enable it under
-**Growth & Quality screen (beta)** in the sidebar.
+A **separate** second-pass filter from the one above, **on by default**,
+kept apart so it can be refined independently: the "20/40 rule" (20%+ YoY
+sales growth, 40%+ YoY PAT growth, both latest-fiscal-year-vs-prior), low
+price volatility ("low standard deviation"), and PEG < 1. Toggle it under
+**Growth & Quality screen (beta)** in the sidebar - since it fetches from
+yfinance for every candidate that already passed the technical filters,
+expect scans to take longer (one extra web request per candidate) than
+with it switched off.
 
 Three different data sources feed this, with three different trust levels:
 

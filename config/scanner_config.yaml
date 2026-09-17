@@ -99,7 +99,7 @@ filters:
   # a second pass to candidates that already passed every technical
   # filter; never part of the conviction score.
   growth_quality:
-    enabled: false
+    enabled: true
     sales_growth_min_pct: 20        # YoY revenue growth % floor, latest fiscal year vs prior
     pat_growth_min_pct: 40          # YoY net income (PAT) growth % floor, latest fiscal year vs prior
     max_annualized_volatility_pct: 35   # "low standard deviation" = annualized SD of daily returns, ceiling
